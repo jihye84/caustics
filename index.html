@@ -137,7 +137,7 @@ let W = 0, H = 0, DPR = 1;
 const st = {
   scene: 0,
   wave: { surf: 0, amp: 1, depth: 1.6, disp: 0, speed: 1 },
-  cup:  { v: 1, bounce: 1, phi: Math.PI + 0.45 },
+  cup:  { el: 26, az: 192, h: 0.5, drink: 0 },
   rod:  { mode: 0, disp: 3, pos: null }
 };
 const SURF_DEF = [ {disp:0}, {disp:7}, {disp:0} ];
@@ -368,7 +368,6 @@ function area(){
   }
   return {x0,x1,y0,y1,w:x1-x0,h:y1-y0,cx:(x0+x1)/2,cy:(y0+y1)/2};
 }
-function cupD(){ const v=st.cup.v; return v>=0.985 ? Infinity : 1/(1-v); }
 const LVS = `#version 300 es
 in vec2 aP; in vec3 aC; uniform vec2 uRes; out vec3 vC;
 void main(){ vC=aC; vec2 q=aP/uRes*2.-1.; gl_Position=vec4(q.x,-q.y,0.,1.); }`;
@@ -402,37 +401,6 @@ function refract(dx,dy,nx,ny,eta){
   if(k<0) return null;
   const a=eta*ci-Math.sqrt(k); return [eta*dx+a*nx, eta*dy+a*ny];
 }
-function cupBuild(N){
-  const {cx,cy,R}=lab.g, d=cupD(), ux=Math.cos(st.cup.phi), uy=Math.sin(st.cup.phi);
-  const w=[1,.55,.32]; let sum=0;
-  for(let i=0;i<N;i++){
-    let ox,oy,dx,dy;
-    const u=(i+Math.random())/N*2-1;               // 고르게 흩뿌린 광선
-    if(!isFinite(d)){
-      dx=-ux; dy=-uy; const s=u*R;
-      ox=cx+ux*2*R-uy*s; oy=cy+uy*2*R+ux*s;
-    } else {
-      ox=cx+ux*d*R; oy=cy+uy*d*R;
-      const a = d>1.0005 ? Math.asin(1/d) : Math.PI/2*0.998;
-      const th=u*a, c=Math.cos(th), s=Math.sin(th);
-      dx=-ux*c+uy*s; dy=-ux*s-uy*c;
-    }
-    const fx=ox-cx, fy=oy-cy, B=fx*dx+fy*dy, C=fx*fx+fy*fy-R*R, D=B*B-C;
-    if(D<=0) continue;
-    const t=-B+Math.sqrt(D); if(t<=1e-6) continue;
-    let px=ox+dx*t, py=oy+dy*t;
-    for(let k=0;k<st.cup.bounce;k++){
-      const nx=(px-cx)/R, ny=(py-cy)/R, dn=dx*nx+dy*ny;
-      dx-=2*dn*nx; dy-=2*dn*ny;
-      const tt=-2*((px-cx)*dx+(py-cy)*dy);
-      const qx=px+dx*tt, qy=py+dy*tt;
-      addSeg(px,py,qx,qy, w[k], .78*w[k], .50*w[k]);
-      if(k===0) sum+=tt;
-      px=qx; py=qy;
-    }
-  }
-  return 0.32*Math.PI*R*R*DPR/Math.max(sum,1);
-}
 function rodBuild(N){
   const g=lab.g, R=g.R, rb=st.rod.mode===1, n0=rb?1.333:1.5;
   const ca=Math.cos(g.ang), sa=Math.sin(g.ang), L=g.len, NB=LAMBDA.length;
@@ -458,32 +426,150 @@ function rodBuild(N){
   }
   return 2*R*DPR/N;
 }
+/* ---------- 머그잔: 햇빛 → 잔 안쪽 벽에서 반사 → 음료 표면 (3D 광선 추적) ---------- */
+const MUG={T:58*Math.PI/180, Hc:1.9, rO:1.08};
+const DRINK=[[0.20,0.11,0.06],[0.62,0.42,0.25],[0.93,0.91,0.86]];
+let mugTex=null, mugKey='';
+function sunVec(){ const c=st.cup, el=c.el*Math.PI/180, az=c.az*Math.PI/180;
+  return [Math.cos(el)*Math.cos(az), Math.cos(el)*Math.sin(az), Math.sin(el)]; }
+function mugSurface(){
+  const c=st.cup, key=[c.el,c.az,c.h,c.drink].join();
+  if(key===mugKey && mugTex) return mugTex;
+  mugKey=key;
+  const N=isMobile?220:300, R=N/2, buf=new Float32Array(N*N);
+  const s=sunVec(), dx=-s[0], dy=-s[1], dz=-s[2], vv=dx*dx+dy*dy, h=c.h;
+  const splat=(x,y,w)=>{
+    const fx=(x+1)*R-0.5, fy=(1-y)*R-0.5, ix=Math.floor(fx), iy=Math.floor(fy), ax=fx-ix, ay=fy-iy;
+    if(ix<0||iy<0||ix>=N-1||iy>=N-1) return;
+    const k=iy*N+ix;
+    buf[k]+=w*(1-ax)*(1-ay); buf[k+1]+=w*ax*(1-ay); buf[k+N]+=w*(1-ax)*ay; buf[k+N+1]+=w*ax*ay;
+  };
+  const sq=Math.ceil(Math.sqrt((isMobile?320000:750000)*4/Math.PI));
+  let cnt=0;
+  for(let j=0;j<sq;j++) for(let i=0;i<sq;i++){
+    let x=((i+Math.random())/sq)*2-1, y=((j+Math.random())/sq)*2-1;
+    if(x*x+y*y>=1) continue; cnt++;
+    let z=0, vx=dx, vy=dy, w=1;
+    for(let b=0;b<3;b++){
+      const tp=(z+h)/(-dz);
+      const B=x*vx+y*vy, C=x*x+y*y-1, tw=(-B+Math.sqrt(Math.max(0,B*B-vv*C)))/vv;
+      if(tp<=tw){ splat(x+vx*tp, y+vy*tp, w); break; }
+      x+=vx*tw; y+=vy*tw; z+=dz*tw;
+      const nn=x*vx+y*vy; vx-=2*nn*x; vy-=2*nn*y;   // 둥근 벽에서 거울 반사
+      w*=0.6;
+    }
+  }
+  // 살짝 흐리게 (3×3)
+  const bl=new Float32Array(N*N);
+  for(let y=1;y<N-1;y++) for(let x=1;x<N-1;x++){
+    const k=y*N+x;
+    bl[k]=(buf[k]*4+buf[k-1]*2+buf[k+1]*2+buf[k-N]*2+buf[k+N]*2+buf[k-N-1]+buf[k-N+1]+buf[k+N-1]+buf[k+N+1])/16;
+  }
+  const norm=Math.PI/(cnt*(4/(N*N)));
+  const cv=document.createElement('canvas'); cv.width=cv.height=N;
+  const cc=cv.getContext('2d'), img=cc.createImageData(N,N), d=img.data, alb=DRINK[c.drink];
+  const E=0.55+0.9*Math.sin(c.el*Math.PI/180);
+  for(let y=0;y<N;y++) for(let x=0;x<N;x++){
+    const u=(x+0.5)/R-1, v=1-(y+0.5)/R, r2=u*u+v*v, o=(y*N+x)*4;
+    if(r2>1){ d[o+3]=0; continue; }
+    const L=bl[y*N+x]*norm*E;
+    const edge=1-0.25*Math.pow(r2,6);
+    for(let k=0;k<3;k++) d[o+k]=255*(1-Math.exp(-2.4*alb[k]*(0.22+L)*edge));
+    d[o+3]=255;
+  }
+  cc.putImageData(img,0,0);
+  mugTex=cv; return cv;
+}
+function drawMug(a){
+  const c=st.cup, T=MUG.T, sT=Math.sin(T), cT=Math.cos(T), Hc=MUG.Hc, rO=MUG.rO, h=c.h;
+  const S=Math.max(30, Math.min(a.w/3.4, a.h/(2*rO*sT+Hc*cT+0.35)));
+  const cx=a.cx-0.25*S, cy=a.cy-S*(Hc*cT)/2+S*0.05;
+  const P=(x,y,z)=>[cx+S*x, cy-S*(y*sT+z*cT)];
+  const s=sunVec(), shl=Math.hypot(s[0],s[1])||1e-6, ux=s[0]/shl, uy=s[1]/shl, el=c.el*Math.PI/180;
+  lab.g={cx,cy,S};
+  // 식탁
+  const bg=ctx.createLinearGradient(0,0,0,H);
+  bg.addColorStop(0,'#4a3424'); bg.addColorStop(1,'#2a1c12');
+  ctx.fillStyle=bg; ctx.fillRect(0,0,W,H);
+  const sp=P(ux*2.2,uy*2.2,-Hc);
+  const lg=ctx.createRadialGradient(sp[0],sp[1],0,sp[0],sp[1],Math.max(W,H)*0.8);
+  lg.addColorStop(0,`rgba(255,214,150,${0.10+0.18*Math.sin(el)})`); lg.addColorStop(1,'rgba(255,214,150,0)');
+  ctx.fillStyle=lg; ctx.fillRect(0,0,W,H);
+  // 식탁 위 그림자
+  const Ls=Math.min(Hc/Math.tan(el),6), a0=Math.atan2(-uy,-ux);
+  ctx.save(); const g0=P(0,0,-Hc); ctx.translate(g0[0],g0[1]); ctx.transform(S,0,0,-S*sT,0,0);
+  ctx.fillStyle='rgba(10,5,2,.42)'; ctx.beginPath();
+  ctx.arc(0,0,rO,a0+Math.PI/2,a0+3*Math.PI/2);
+  ctx.arc(-ux*Ls,-uy*Ls,rO,a0-Math.PI/2,a0+Math.PI/2);
+  ctx.closePath(); ctx.fill(); ctx.restore();
+  const cer=[240,235,226];
+  const col=k=>`rgb(${cer.map(v=>Math.round(Math.min(255,v*k))).join(',')})`;
+  // 바깥 몸통 (앞쪽 절반) — 왼쪽~오른쪽 밝기를 그라디언트로
+  const NS=180;
+  const bgr=ctx.createLinearGradient(cx-S*rO,0,cx+S*rO,0);
+  for(let i=0;i<=24;i++){
+    const x=-1+2*i/24, th=-Math.acos(Math.max(-1,Math.min(1,x)));
+    const nd=Math.max(0,Math.cos(th)*s[0]+Math.sin(th)*s[1]);
+    bgr.addColorStop(i/24, col(0.66+0.42*nd));
+  }
+  ctx.fillStyle=bgr; ctx.beginPath();
+  ctx.ellipse(cx,cy,S*rO,S*rO*sT,0,0,Math.PI);
+  { const b0=P(0,0,-Hc); ctx.ellipse(b0[0],b0[1],S*rO,S*rO*sT,0,Math.PI,0,true); }
+  ctx.closePath(); ctx.fill();
+  // 손잡이
+  ctx.save(); ctx.lineCap='round';
+  const hp=[]; for(let i=0;i<=24;i++){ const u=i/24; hp.push(P(rO-0.05+0.62*Math.sin(Math.PI*u), 0, -0.32-1.05*u)); }
+  const hk=0.66+0.4*Math.max(0,s[0]);
+  ctx.strokeStyle=col(hk*0.85); ctx.lineWidth=S*0.2;
+  ctx.beginPath(); hp.forEach((q,j)=>j?ctx.lineTo(q[0],q[1]):ctx.moveTo(q[0],q[1])); ctx.stroke();
+  ctx.strokeStyle=col(hk*1.05); ctx.lineWidth=S*0.07;
+  ctx.beginPath(); hp.forEach((q,j)=>j?ctx.lineTo(q[0]-S*0.02,q[1]-S*0.03):ctx.moveTo(q[0]-S*0.02,q[1]-S*0.03)); ctx.stroke();
+  ctx.restore();
+  // 테두리(입술)
+  const rk=0.6+0.5*Math.sin(el);
+  ctx.fillStyle=col(rk); ctx.beginPath();
+  ctx.ellipse(cx,cy,S*rO,S*rO*sT,0,0,Math.PI*2); ctx.ellipse(cx,cy,S,S*sT,0,0,Math.PI*2,true); ctx.fill();
+  // 잔 안쪽: 뒤쪽 벽
+  ctx.save(); ctx.beginPath(); ctx.ellipse(cx,cy,S,S*sT,0,0,Math.PI*2); ctx.clip();
+  const tanE=Math.tan(el);
+  for(let i=0;i<NS;i++){
+    const t0=Math.PI*i/NS, t1=Math.PI*(i+1.6)/NS, tm=Math.PI*(i+0.5)/NS;
+    const pu=Math.cos(tm)*ux+Math.sin(tm)*uy;
+    const zs = pu<0 ? Math.max(-h, 2*pu*tanE) : 0;            // 그늘 경계 높이
+    const nd = Math.max(0, -(Math.cos(tm)*s[0]+Math.sin(tm)*s[1]));
+    const quad=(z0,z1,k)=>{ if(z1>=z0) return;
+      const p=[P(Math.cos(t0),Math.sin(t0),z0),P(Math.cos(t1),Math.sin(t1),z0),P(Math.cos(t1),Math.sin(t1),z1),P(Math.cos(t0),Math.sin(t0),z1)];
+      ctx.fillStyle=col(k);
+      ctx.beginPath(); p.forEach((q,j)=>j?ctx.lineTo(q[0],q[1]):ctx.moveTo(q[0],q[1])); ctx.closePath(); ctx.fill(); };
+    quad(0,zs,0.7+0.6*nd);
+    quad(zs,-h,0.52);
+  }
+  // 음료 표면
+  const tex=mugSurface(), N=tex.width, c0=P(0,0,-h);
+  ctx.save(); ctx.beginPath(); ctx.ellipse(c0[0],c0[1],S,S*sT,0,0,Math.PI*2); ctx.clip();
+  ctx.imageSmoothingEnabled=true;
+  ctx.drawImage(tex, c0[0]-S, c0[1]-S*sT, 2*S, 2*S*sT);
+  ctx.restore();
+  ctx.strokeStyle='rgba(0,0,0,.25)'; ctx.lineWidth=1.5;
+  ctx.beginPath(); ctx.ellipse(c0[0],c0[1],S,S*sT,0,0,Math.PI*2); ctx.stroke();
+  ctx.restore();
+  // 해 표시 (작은 빛 동그라미)
+  let sx=cx+ux*S*2.1, sy=cy-uy*S*sT*2.1-S*(0.2+1.4*Math.sin(el));
+  sx=Math.max(a.x0+24,Math.min(a.x1-24,sx)); sy=Math.max(a.y0+24,Math.min(a.y1-24,sy));
+  const sg=ctx.createRadialGradient(sx,sy,0,sx,sy,22);
+  sg.addColorStop(0,'rgba(255,244,214,1)'); sg.addColorStop(.45,'rgba(255,214,140,.8)'); sg.addColorStop(1,'rgba(255,190,110,0)');
+  ctx.fillStyle=sg; ctx.beginPath(); ctx.arc(sx,sy,22,0,7); ctx.fill();
+  chip(`해 높이 ${Math.round(c.el)}° · 반사 코스틱스`);
+}
 function labReset(){
   if(st.scene===0) return;
   ctx.setTransform(DPR,0,0,DPR,0,0);
   ctx.globalCompositeOperation='source-over';
   const a=area(); vn=0; let gain=1;
   if(st.scene===1){
-    const R=Math.max(40,0.40*Math.min(a.w,a.h));
-    lab.g={cx:a.cx,cy:a.cy,R};
-    const bg=ctx.createRadialGradient(a.cx,a.cy,R*0.3,a.cx,a.cy,Math.max(W,H));
-    bg.addColorStop(0,'#17110c'); bg.addColorStop(1,'#060403');
-    ctx.fillStyle=bg; ctx.fillRect(0,0,W,H);
-    const cg=ctx.createRadialGradient(a.cx-R*.2,a.cy-R*.2,R*.1,a.cx,a.cy,R);
-    cg.addColorStop(0,'#2a170c'); cg.addColorStop(1,'#140a05');
-    ctx.fillStyle=cg; ctx.beginPath(); ctx.arc(a.cx,a.cy,R,0,7); ctx.fill();
-    const lw=Math.max(6,R*0.07);
-    const rg=ctx.createLinearGradient(a.cx-R,a.cy-R,a.cx+R,a.cy+R);
-    rg.addColorStop(0,'#f4efe6'); rg.addColorStop(1,'#a9a196');
-    ctx.strokeStyle=rg; ctx.lineWidth=lw; ctx.beginPath(); ctx.arc(a.cx,a.cy,R+lw/2,0,7); ctx.stroke();
-    const d=cupD(), ux=Math.cos(st.cup.phi), uy=Math.sin(st.cup.phi);
-    const md = isFinite(d) ? Math.max(R+lw+14, Math.min(d*R+lw, Math.min(W,H)*0.48)) : R+lw+30;
-    const mx=a.cx+ux*md, my=a.cy+uy*md;
-    const sg=ctx.createRadialGradient(mx,my,0,mx,my,16);
-    sg.addColorStop(0,'rgba(255,236,190,1)'); sg.addColorStop(1,'rgba(255,190,110,0)');
-    ctx.fillStyle=sg; ctx.beginPath(); ctx.arc(mx,my,16,0,7); ctx.fill();
-    gain = cupBuild(isMobile ? 30000 : 60000);
-    chip(!isFinite(d) ? '지금 곡선: 네프로이드' : (d<1.02 ? '지금 곡선: 카디오이드(하트)' : '지금 곡선: 둘 사이 어딘가'));
+    drawMug(a);
+    if(G){ gl.bindFramebuffer(gl.FRAMEBUFFER,null); gl.viewport(0,0,glc.width,glc.height); gl.clearColor(0,0,0,1); gl.clear(gl.COLOR_BUFFER_BIT); }
+    return;
   } else {
     const rb = st.rod.mode===1;
     const portrait = a.h > a.w*1.15;
@@ -527,7 +613,12 @@ let labDirty=false;
 function labPointer(e){
   if(!lab.g) return;
   if(st.scene===1){
-    st.cup.phi=Math.atan2(e.clientY-lab.g.cy, e.clientX-lab.g.cx);
+    const c=st.cup;
+    if(e.type==='pointerdown'){ lab.last=[e.clientX,e.clientY]; return; }
+    const ddx=e.clientX-lab.last[0], ddy=e.clientY-lab.last[1]; lab.last=[e.clientX,e.clientY];
+    c.az=((c.az-ddx*0.4)%360+360)%360;
+    c.el=Math.max(6,Math.min(70,c.el-ddy*0.15));
+    (c.rows||[]).forEach(r=>r._sync());
   } else {
     const a=area(), dx=e.clientX-a.cx, dy=e.clientY-a.cy;
     st.rod.pos = lab.g.portrait ? [dy,-dx] : [dx,dy];
@@ -540,7 +631,7 @@ const INFO = {
   w0:['굴절 코스틱스','수영장 바닥의 빛그물','볼록한 물결은 작은 볼록렌즈처럼 빛을 모으고, 오목한 곳은 흩어요. 모인 빛이 바닥에 밝은 그물을 그려요. 화면을 누르거나 문질러 물결을 일으켜 보세요.'],
   w1:['굴절 + 분산','골판 플라스틱 너머의 햇빛','골이 진 투명판을 지난 빛이 휘어진 밝은 선으로 모여요. 한쪽이 칼처럼 또렷한 이 선이 접힘(fold) 코스틱스예요. 색마다 꺾이는 정도가 달라 무지개 테가 생겨요.'],
   w2:['굴절 코스틱스','빗방울이 떨어진 물','잔잔한 물에 떨어진 빗방울이 동그란 물결을 만들고, 그 물결이 빛을 모았다 흩었다 하며 움직이는 고리 무늬를 그려요. 화면을 눌러 직접 떨어뜨려 보세요.'],
-  c:['반사 코스틱스','커피잔 속 하트','둥근 잔 벽에 반사된 빛줄기들이 한 곡선을 따라 겹쳐 밝아져요. 빛이 멀면 네프로이드, 빛이 잔 가장자리에 있으면 카디오이드(하트)가 돼요. 화면을 끌어 빛의 방향을 바꿔 보세요.'],
+  c:['반사 코스틱스','커피잔 속 하트','비스듬한 햇빛이 잔 안쪽 벽에 반사되어 음료 위로 모이면 하트 모양 곡선이 생겨요. 잔이 투명하지 않아도 안쪽이 반들반들하면 돼요. 화면을 끌어 해를 옮겨 보세요.'],
   r0:['굴절 + 분산','유리 막대가 모은 빛','둥근 유리를 지난 빛은 뒤쪽에서 한 점 근처로 모이며 뾰족점(cusp)을 만들어요. 색마다 모이는 자리가 조금씩 달라 가장자리에 무지개 테가 생겨요. 끌어서 유리를 옮겨 보세요.'],
   r1:['굴절 + 반사 + 분산','물방울 속 무지개','물방울 안에서 한 번 반사되어 나온 빛은 들어온 방향에서 약 42° 기운 쪽으로 몰려요. 하늘의 무지개는 바로 이 코스틱스예요. 분산을 키우면 색이 더 벌어져요.']
 };
@@ -576,15 +667,20 @@ function buildCtrls(){
     chip(w.surf===1?'접힘 코스틱스':'');
   } else if(s===1){
     const c=st.cup; setInfo('c');
-    box.append(slider('빛까지 거리',0,1,0.005,()=>c.v,v=>{c.v=v;labDirty=true;},v=>{const d=v>=0.985?Infinity:1/(1-v); return !isFinite(d)?'아주 멀리 (햇빛)':d<1.02?'잔 가장자리':'반지름의 '+d.toFixed(1)+'배';}));
-    box.append(seg('반사 횟수',['1번','2번','3번'],()=>c.bounce-1,i=>{c.bounce=i+1;labDirty=true;}));
+    const DIR=['오른쪽','오른쪽 뒤','뒤쪽','왼쪽 뒤','왼쪽','왼쪽 앞','앞 (내 쪽)','오른쪽 앞'];
+    const r1=slider('해 높이',6,70,1,()=>Math.round(c.el),v=>{c.el=v;labDirty=true;},v=>Math.round(v)+'°'+(v<15?' (해 질 녘)':v>50?' (한낮)':''));
+    const r2=slider('해의 방향',0,359,1,()=>Math.round(c.az),v=>{c.az=v;labDirty=true;},v=>DIR[Math.round(v/45)%8]);
+    c.rows=[r1,r2];
+    box.append(r1,r2);
+    box.append(slider('음료 양',15,92,1,()=>Math.round((1-c.h/MUG.Hc)*100),v=>{c.h=MUG.Hc*(1-v/100);labDirty=true;},v=>'잔의 '+Math.round(v)+'%'));
+    box.append(seg('음료',['블랙커피','라떼','우유'],()=>c.drink,i=>{c.drink=i;labDirty=true;}));
   } else {
     const r=st.rod; setInfo('r'+r.mode);
     box.append(seg('무엇을 지날까',['유리 막대','물방울'],()=>r.mode,i=>{ r.mode=i; r.pos=null; r.disp=i?2:3; buildCtrls(); labDirty=true; }));
     box.append(slider('무지개(분산)',0,12,0.5,()=>r.disp,v=>{r.disp=v;labDirty=true;},v=>v===0?'없음 (흰빛)':v<=1?'실제 정도':'과장 '+v+'배'));
   }
 }
-const HINTS=['화면을 누르면 물방울이 떨어져요','화면을 끌어 빛의 방향을 바꿔 보세요','끌어서 유리를 옮겨 보세요'];
+const HINTS=['화면을 누르면 물방울이 떨어져요','화면을 끌어 해의 방향과 높이를 바꿔 보세요','끌어서 유리를 옮겨 보세요'];
 function setScene(s){
   st.scene=s;
   document.querySelectorAll('#bar [data-s]').forEach(b=>b.classList.toggle('on',+b.dataset.s===s));
