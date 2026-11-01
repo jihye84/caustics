@@ -1,0 +1,652 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>빛그물 — 코스틱스 감상</title>
+<script>
+/* 카카오톡·네이버·페이스북·인스타그램 등 인앱 브라우저에서 열리면 기본 브라우저로 다시 열기 */
+(function () {
+  var ua = navigator.userAgent || '';
+  var url = location.href;
+  var inApp = /KAKAOTALK|NAVER\(inapp|FBAN|FBAV|FB_IAB|Instagram|Line\/|DaumApps|everytimeApp|wv\)/i.test(ua);
+  if (/KAKAOTALK/i.test(ua)) { location.href = 'kakaotalk://web/openExternal?url=' + encodeURIComponent(url); return; }
+  if (/Line\//i.test(ua) && url.indexOf('openExternalBrowser=1') < 0) {
+    location.href = url + (url.indexOf('?') < 0 ? '?' : '&') + 'openExternalBrowser=1'; return;
+  }
+  if (!inApp) return;
+  if (/Android/i.test(ua)) {
+    location.href = 'intent://' + url.replace(/^https?:\/\//, '') + '#Intent;scheme=https;package=com.android.chrome;end'; return;
+  }
+  document.addEventListener('DOMContentLoaded', function () {
+    var box = document.createElement('div');
+    box.setAttribute('role', 'dialog');
+    box.style.cssText = 'position:fixed;inset:0;z-index:99;background:rgba(13,17,32,.94);color:#eef0f8;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:24px;text-align:center;font:15px/1.6 system-ui,sans-serif';
+    box.innerHTML = '<strong style="font-size:18px">사파리에서 열어 주세요</strong>' +
+      '<span>이 앱 안의 브라우저에서는 일부 기능이 제대로 작동하지 않을 수 있어요.<br>⋯ 메뉴에서 <b>Safari로 열기</b>를 눌러 주세요.</span>' +
+      '<button id="copyUrl" style="font:inherit;padding:10px 18px;border-radius:999px;border:0;background:#eef0f8;color:#0d1120">주소 복사</button>' +
+      '<button id="stayHere" style="font:inherit;background:none;border:0;color:#9aa3c0;text-decoration:underline">그냥 여기서 보기</button>';
+    document.body.appendChild(box);
+    document.getElementById('copyUrl').onclick = function () {
+      var b = this;
+      (navigator.clipboard ? navigator.clipboard.writeText(url) : Promise.reject()).then(
+        function () { b.textContent = '복사했어요'; }, function () { prompt('주소를 복사하세요', url); });
+    };
+    document.getElementById('stayHere').onclick = function () { box.remove(); };
+  });
+})();
+</script>
+<style>
+:root{--ink:#eef0f8;--mut:#9aa3c0;--panel:rgba(12,15,26,.80);--line:rgba(255,255,255,.12);--acc:#ffd38a}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;overflow:hidden;background:#05070d;color:var(--ink);
+  font-family:"Pretendard","Apple SD Gothic Neo","Noto Sans KR",system-ui,sans-serif;
+  -webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-select:none}
+canvas{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:none}
+#c2{display:none;pointer-events:none;z-index:0}
+#gl{z-index:1}
+#title{position:fixed;z-index:2;top:max(12px,env(safe-area-inset-top));left:16px;pointer-events:none;
+  text-shadow:0 1px 8px rgba(0,0,0,.6)}
+#title b{font-size:clamp(17px,2.4vh,24px);letter-spacing:.04em}
+#title span{display:block;font-size:clamp(11px,1.4vh,14px);color:var(--mut);margin-top:2px}
+#chip{position:fixed;z-index:2;top:max(12px,env(safe-area-inset-top));right:16px;padding:6px 12px;border-radius:999px;
+  background:var(--panel);border:1px solid var(--line);font-size:clamp(12px,1.5vh,15px);color:var(--acc);
+  backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);pointer-events:none;transition:opacity .3s}
+#bar{position:fixed;left:50%;transform:translateX(-50%);bottom:max(12px,env(safe-area-inset-bottom));
+  display:flex;gap:6px;padding:6px;border-radius:999px;background:var(--panel);border:1px solid var(--line);
+  backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);z-index:5;max-width:calc(100vw - 16px)}
+#bar button{font:inherit;font-size:clamp(14px,1.8vh,18px);min-height:clamp(44px,5.4vh,58px);padding:0 clamp(12px,1.6vw,22px);
+  border:0;border-radius:999px;background:transparent;color:var(--mut);cursor:pointer;white-space:nowrap}
+#bar button.on{background:var(--ink);color:#0b0e18;font-weight:700}
+#bar .sep{width:1px;background:var(--line);margin:8px 2px}
+#bar #tgl{color:var(--ink)}
+#bar #tgl.on{background:var(--acc);color:#24180a}
+#panel{position:fixed;z-index:4;background:var(--panel);border:1px solid var(--line);border-radius:18px;
+  backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);padding:16px 18px;display:flex;flex-direction:column;gap:12px;
+  overflow:auto;transition:opacity .25s,transform .25s}
+#panel.hide{opacity:0;pointer-events:none}
+/* 좁은 화면: 아래 서랍 */
+#panel{left:8px;right:8px;bottom:calc(max(12px,env(safe-area-inset-bottom)) + clamp(58px,7vh,72px));max-height:58vh}
+@media not ((orientation:landscape) and (min-width:700px)){
+  #panel{padding:12px 14px;gap:8px}
+  #info p{-webkit-line-clamp:3;min-height:calc(3 * 1.6em)}
+  #info h2{margin:0 0 4px}
+  #ctrls{gap:6px!important}
+  .row{gap:0}
+  input[type=range]{height:28px}
+}
+#panel.hide{transform:translateY(16px)}
+/* 가로로 넓은 화면: 오른쪽 패널 */
+@media (orientation:landscape) and (min-width:700px){
+  #panel{left:auto;right:12px;top:max(12px,env(safe-area-inset-top));bottom:calc(max(12px,env(safe-area-inset-bottom)) + clamp(60px,7vh,76px));
+    width:clamp(260px,24vw,340px);max-height:none}
+  #panel.hide{transform:translateX(16px)}
+  #chip{right:calc(clamp(260px,24vw,340px) + 28px)}
+  body.closed #chip{right:16px}
+}
+#info .tag{font-size:12px;color:var(--acc);letter-spacing:.05em}
+#info h2{font-size:clamp(16px,2vh,20px);margin:2px 0 6px}
+#info p{font-size:clamp(13px,1.55vh,15px);line-height:1.6;color:#c9cee0;
+  display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden;min-height:calc(4 * 1.6em)}
+.row{display:flex;flex-direction:column;gap:6px}
+.row .lab{display:flex;justify-content:space-between;font-size:13px;color:var(--mut)}
+.row .lab em{font-style:normal;color:var(--ink)}
+.seg{display:flex;gap:4px;background:rgba(255,255,255,.06);border-radius:12px;padding:3px}
+.seg button{flex:1;font:inherit;font-size:13px;min-height:38px;border:0;border-radius:10px;background:transparent;color:var(--mut);cursor:pointer}
+.seg button.on{background:rgba(255,255,255,.9);color:#0b0e18;font-weight:700}
+input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:30px;background:transparent;cursor:pointer}
+input[type=range]::-webkit-slider-runnable-track{height:4px;border-radius:4px;background:rgba(255,255,255,.18)}
+input[type=range]::-moz-range-track{height:4px;border-radius:4px;background:rgba(255,255,255,.18)}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:22px;height:22px;border-radius:50%;background:var(--acc);margin-top:-9px;border:0}
+input[type=range]::-moz-range-thumb{width:22px;height:22px;border-radius:50%;background:var(--acc);border:0}
+#hint{position:fixed;left:50%;bottom:calc(max(12px,env(safe-area-inset-bottom)) + clamp(66px,8vh,84px));transform:translateX(-50%);
+  padding:8px 16px;border-radius:999px;background:rgba(0,0,0,.55);font-size:clamp(13px,1.6vh,16px);color:#fff;
+  pointer-events:none;opacity:0;transition:opacity .5s;white-space:nowrap;z-index:3}
+#hint.show{opacity:1}
+#nogl{position:fixed;inset:0;display:none;align-items:center;justify-content:center;text-align:center;color:var(--mut);padding:24px}
+</style>
+</head>
+<body>
+<canvas id="gl"></canvas>
+<canvas id="c2"></canvas>
+<div id="nogl">이 기기(브라우저)에서는 WebGL2가 켜지지 않아 빛을 그릴 수 없어요.<br>크롬이나 사파리 최신 버전에서 열어 주세요.</div>
+
+<div id="title"><b>빛그물</b><span>코스틱스 감상실</span></div>
+<div id="chip"></div>
+<div id="hint"></div>
+
+<div id="panel">
+  <div id="info"><div class="tag" id="itag"></div><h2 id="ititle"></h2><p id="itext"></p></div>
+  <div id="ctrls" style="display:flex;flex-direction:column;gap:10px"></div>
+</div>
+
+<nav id="bar">
+  <button data-s="0" class="on">물결 무늬</button>
+  <button data-s="1">커피잔 하트</button>
+  <button data-s="2">유리와 물방울</button>
+  <span class="sep"></span>
+  <button id="tgl">조절</button>
+</nav>
+
+<script>
+(() => {
+const $ = s => document.querySelector(s);
+const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && innerWidth < 1100);
+let W = 0, H = 0, DPR = 1;
+
+const st = {
+  scene: 0,
+  wave: { surf: 0, amp: 1, depth: 1.6, disp: 0, speed: 1 },
+  cup:  { v: 1, bounce: 1, phi: Math.PI + 0.45 },
+  rod:  { mode: 0, disp: 3, pos: null }
+};
+const SURF_DEF = [ {disp:0}, {disp:7}, {disp:0} ];
+
+/* ---------- 파장(색) 8개: 합치면 흰빛 ---------- */
+const LAMBDA = [420, 450, 480, 510, 545, 580, 615, 660];
+function wlRGB(l){
+  let r=0,g=0,b=0;
+  if(l<440){r=-(l-440)/60*0.6;b=1;} else if(l<490){g=(l-440)/50;b=1;}
+  else if(l<510){g=1;b=-(l-510)/20;} else if(l<580){r=(l-510)/70;g=1;}
+  else if(l<645){r=1;g=-(l-645)/65;} else {r=1;}
+  return [r,g,b];
+}
+const BAND = (() => {
+  const c = LAMBDA.map(wlRGB), s=[0,0,0];
+  c.forEach(v=>{s[0]+=v[0];s[1]+=v[1];s[2]+=v[2];});
+  return c.map(v=>[v[0]/s[0],v[1]/s[1],v[2]/s[2]]);   // 8개를 더하면 (1,1,1)
+})();
+const iorOf = (n0, disp, l) => n0 + 0.02*disp*((550/l)*(550/l)-1);
+
+/* ---------- 화면 요소 ---------- */
+const glc = $('#gl'), c2 = $('#c2'), ctx = c2.getContext('2d');
+const panel = $('#panel'), tgl = $('#tgl');
+const isSide = () => matchMedia('(orientation:landscape) and (min-width:700px)').matches;
+
+let hintT;
+function hint(msg){ const h=$('#hint'); h.textContent=msg; h.classList.add('show'); clearTimeout(hintT); hintT=setTimeout(()=>h.classList.remove('show'),3200); }
+function chip(msg){ const c=$('#chip'); c.textContent=msg; c.style.opacity=msg?1:0; }
+
+/* ========== 1. 물결 장면 (WebGL2, 실제 굴절 계산) ========== */
+const gl = glc.getContext('webgl2', {antialias:false, alpha:false, preserveDrawingBuffer:false});
+let G = null;
+const VS = `#version 300 es
+precision highp float;
+in vec2 aGrid;
+uniform vec2 uExt, uView;
+uniform float uTime, uAmp, uDepth, uIor;
+uniform int uMode;
+uniform vec4 uDrops[16];
+out vec2 vOld; out vec2 vNew;
+const float PI=3.14159265;
+float height(vec2 p){
+  float t=uTime, h=0.;
+  if(uMode==1){
+    float u = p.x + 0.30*p.y*p.y - 0.22*p.y + 0.25*sin(t*0.12);
+    h += 0.15*sin(3.0*u);
+    h += 0.0034*sin(25.0*p.x);
+    h += 0.0012*sin(25.0*p.x*1.93+1.7);
+  } else {
+    float calm = uMode==2 ? 0.28 : 1.0;
+    vec3 wv[7] = vec3[7](vec3(0.30,9.,1.),vec3(1.25,11.,1.),vec3(2.05,13.,.9),vec3(2.95,8.,1.),
+                         vec3(3.85,15.,.8),vec3(4.65,10.,1.),vec3(5.55,12.,.9));
+    for(int i=0;i<7;i++){
+      float a=wv[i].x, k=wv[i].y;
+      vec2 d=vec2(cos(a),sin(a));
+      h += calm*wv[i].z*1.45/(k*k)*sin(dot(p,d)*k - sqrt(k)*1.1*t + float(i)*1.7);
+    }
+  }
+  for(int i=0;i<16;i++){
+    vec4 d=uDrops[i];
+    if(d.w<=0.) continue;
+    float age=t-d.z;
+    if(age<0.||age>7.) continue;
+    float r=length(p-d.xy);
+    float x=r-age*0.45;
+    float env=exp(-x*x*30.)*exp(-age*0.55)/(1.+r*2.5);
+    h += d.w*0.0022*env*cos(x*34.);
+  }
+  return h*uAmp;
+}
+void main(){
+  vec2 p=(aGrid*2.-1.)*uExt;
+  float e=0.0025;
+  float hx=(height(p+vec2(e,0.))-height(p-vec2(e,0.)))/(2.*e);
+  float hy=(height(p+vec2(0.,e))-height(p-vec2(0.,e)))/(2.*e);
+  vec3 n=normalize(vec3(-hx,-hy,1.));
+  vec3 L=normalize(vec3(0.12,0.18,-1.));
+  vec3 r=refract(L,n,1./uIor);
+  vec3 r0=refract(L,vec3(0.,0.,1.),1./uIor);
+  vec2 hit=p + r.xy*(uDepth/-r.z) - r0.xy*(uDepth/-r0.z);
+  vOld=p; vNew=hit;
+  gl_Position=vec4(hit/uView,0.,1.);
+}`;
+const FS = `#version 300 es
+precision highp float;
+in vec2 vOld; in vec2 vNew;
+uniform vec3 uCol;
+out vec4 o;
+void main(){
+  vec2 ax=dFdx(vOld), ay=dFdy(vOld), bx=dFdx(vNew), by=dFdy(vNew);
+  float a0=abs(ax.x*ay.y-ax.y*ay.x), a1=abs(bx.x*by.y-bx.y*by.x);
+  float I=min(a0/max(a1,1e-14),60.);
+  o=vec4(uCol*I,1.);
+}`;
+const PVS = `#version 300 es
+in vec2 aP; out vec2 vUv;
+void main(){ vUv=aP*.5+.5; gl_Position=vec4(aP,0.,1.); }`;
+const PFS = `#version 300 es
+precision highp float;
+in vec2 vUv; out vec4 o;
+uniform sampler2D uTex; uniform vec2 uView; uniform int uMode; uniform float uBack;
+void main(){
+  vec3 L=texture(uTex,vUv).rgb/uBack;
+  vec2 w=(vUv*2.-1.)*uView;
+  vec3 alb; float amb, ex;
+  if(uMode==1){
+    alb=vec3(.80,.78,.74); amb=.16; ex=.42;
+    float g=abs(fract(w.x*4.)-.5); alb*=1.-.05*smoothstep(.45,.5,g);
+  } else {
+    vec2 g=abs(fract(w*4.2)-.5);
+    float line=smoothstep(.455,.5,max(g.x,g.y));
+    alb=mix(vec3(.50,.80,.90),vec3(.30,.55,.68),line*.7);
+    amb=.14; ex=.5;
+  }
+  vec3 c=alb*(amb+L*ex);
+  vec2 q=vUv-.5; c*=1.-.45*dot(q,q);
+  c=1.-exp(-c*1.7);
+  if(uMode!=1) c=mix(c,c*vec3(.72,.96,1.08),.45);
+  o=vec4(pow(c,vec3(.92)),1.);
+}`;
+
+function initGL(){
+  if(!gl){ return false; }
+  try{
+    const sh=(t,s)=>{const x=gl.createShader(t);gl.shaderSource(x,s);gl.compileShader(x);
+      if(!gl.getShaderParameter(x,gl.COMPILE_STATUS))throw new Error(gl.getShaderInfoLog(x));return x;};
+    const pr=(v,f)=>{const p=gl.createProgram();gl.attachShader(p,sh(gl.VERTEX_SHADER,v));gl.attachShader(p,sh(gl.FRAGMENT_SHADER,f));
+      gl.linkProgram(p);if(!gl.getProgramParameter(p,gl.LINK_STATUS))throw new Error(gl.getProgramInfoLog(p));return p;};
+    G = { p: pr(VS,FS), pp: pr(PVS,PFS) };
+    G.u = n => gl.getUniformLocation(G.p,n);
+    G.uq = n => gl.getUniformLocation(G.pp,n);
+    G.float = !!gl.getExtension('EXT_color_buffer_float');
+    G.back = G.float ? 1 : 0.08;
+    // 화면 전체 삼각형
+    G.qv = gl.createVertexArray(); gl.bindVertexArray(G.qv);
+    const qb=gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER,qb);
+    gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,3,-1,-1,3]),gl.STATIC_DRAW);
+    const la=gl.getAttribLocation(G.pp,'aP'); gl.enableVertexAttribArray(la); gl.vertexAttribPointer(la,2,gl.FLOAT,false,0,0);
+    G.gv = gl.createVertexArray(); G.gb = gl.createBuffer(); G.ib = gl.createBuffer();
+    G.tex = gl.createTexture(); G.fb = gl.createFramebuffer();
+    return true;
+  }catch(e){ console.error(e); G=null; return false; }
+}
+let view=[1,1], ext=[1,1];
+function sizeGL(){
+  if(!G) return;
+  glc.width=Math.round(W*DPR); glc.height=Math.round(H*DPR);
+  view = W>H ? [W/H,1] : [1,H/W];
+  ext = [view[0]*1.12, view[1]*1.12];
+  const short = /[?&]lo/.test(location.search) ? 80 : (isMobile ? 150 : 220);
+  const m = Math.min(ext[0],ext[1]);
+  const nx = Math.round(short*ext[0]/m), ny = Math.round(short*ext[1]/m);
+  const pos = new Float32Array((nx+1)*(ny+1)*2);
+  let k=0; for(let j=0;j<=ny;j++) for(let i=0;i<=nx;i++){ pos[k++]=i/nx; pos[k++]=j/ny; }
+  const idx = new Uint32Array(nx*ny*6); k=0;
+  for(let j=0;j<ny;j++) for(let i=0;i<nx;i++){
+    const a=j*(nx+1)+i, b=a+1, c=a+nx+1, d=c+1;
+    idx[k++]=a;idx[k++]=b;idx[k++]=c; idx[k++]=b;idx[k++]=d;idx[k++]=c;
+  }
+  G.count = idx.length;
+  gl.bindVertexArray(G.gv);
+  gl.bindBuffer(gl.ARRAY_BUFFER,G.gb); gl.bufferData(gl.ARRAY_BUFFER,pos,gl.STATIC_DRAW);
+  const la=gl.getAttribLocation(G.p,'aGrid'); gl.enableVertexAttribArray(la); gl.vertexAttribPointer(la,2,gl.FLOAT,false,0,0);
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,G.ib); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,idx,gl.STATIC_DRAW);
+  gl.bindTexture(gl.TEXTURE_2D,G.tex);
+  if(G.float) gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA16F,glc.width,glc.height,0,gl.RGBA,gl.HALF_FLOAT,null);
+  else gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,glc.width,glc.height,0,gl.RGBA,gl.UNSIGNED_BYTE,null);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
+  gl.bindFramebuffer(gl.FRAMEBUFFER,G.fb);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,gl.TEXTURE_2D,G.tex,0);
+  if(gl.checkFramebufferStatus(gl.FRAMEBUFFER)!==gl.FRAMEBUFFER_COMPLETE && G.float){
+    G.float=false; G.back=0.08; sizeGL(); return;
+  }
+  gl.bindFramebuffer(gl.FRAMEBUFFER,null);
+}
+const drops = new Float32Array(64); let dropI=0, simT=0, nextRain=0;
+function addDrop(x,y,s){ drops.set([x,y,simT,s],dropI*4); dropI=(dropI+1)%16; }
+function renderGL(){
+  const w=st.wave, mode=w.surf;
+  const n0 = mode===1 ? 1.5 : 1.333;
+  gl.bindFramebuffer(gl.FRAMEBUFFER,G.fb);
+  gl.viewport(0,0,glc.width,glc.height);
+  gl.clearColor(0,0,0,1); gl.clear(gl.COLOR_BUFFER_BIT);
+  gl.useProgram(G.p); gl.bindVertexArray(G.gv);
+  gl.enable(gl.BLEND); gl.blendFunc(gl.ONE,gl.ONE);
+  gl.uniform2f(G.u('uExt'),ext[0],ext[1]); gl.uniform2f(G.u('uView'),view[0],view[1]);
+  gl.uniform1f(G.u('uTime'),simT); gl.uniform1f(G.u('uAmp'),w.amp); gl.uniform1f(G.u('uDepth'),w.depth);
+  gl.uniform1i(G.u('uMode'),mode); gl.uniform4fv(G.u('uDrops[0]'),drops);
+  const uI=G.u('uIor'), uC=G.u('uCol'), b=G.back;
+  if(w.disp<=0){
+    gl.uniform1f(uI,n0); gl.uniform3f(uC,b,b,b);
+    gl.drawElements(gl.TRIANGLES,G.count,gl.UNSIGNED_INT,0);
+  } else {
+    for(let i=0;i<LAMBDA.length;i++){
+      gl.uniform1f(uI,iorOf(n0,w.disp,LAMBDA[i]));
+      gl.uniform3f(uC,BAND[i][0]*b,BAND[i][1]*b,BAND[i][2]*b);
+      gl.drawElements(gl.TRIANGLES,G.count,gl.UNSIGNED_INT,0);
+    }
+  }
+  gl.disable(gl.BLEND);
+  gl.bindFramebuffer(gl.FRAMEBUFFER,null);
+  gl.viewport(0,0,glc.width,glc.height);
+  gl.useProgram(G.pp); gl.bindVertexArray(G.qv);
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D,G.tex);
+  gl.uniform1i(G.uq('uTex'),0); gl.uniform2f(G.uq('uView'),view[0],view[1]);
+  gl.uniform1i(G.uq('uMode'),mode); gl.uniform1f(G.uq('uBack'),G.back);
+  gl.drawArrays(gl.TRIANGLES,0,3);
+}
+let lastDrop=null;
+function glPointer(e, down){
+  const x=(e.clientX/W*2-1)*view[0], y=(1-e.clientY/H*2)*view[1];
+  if(down || !lastDrop || Math.hypot(x-lastDrop[0],y-lastDrop[1])>0.18){
+    addDrop(x,y, down?1.3:0.8); lastDrop=[x,y];
+  }
+}
+
+/* ========== 2·3. 빛줄기 실험실 (광선을 하나하나 계산 → WebGL로 빛을 더해 그림) ========== */
+const lab = { g:null };
+function area(){
+  const bar=$('#bar').getBoundingClientRect();
+  let x0=0, x1=W, y0=48, y1=bar.top-8;
+  if(!panel.classList.contains('hide')){
+    const r=panel.getBoundingClientRect();
+    if(isSide()) x1=r.left-8; else y1=Math.min(y1,r.top-8);
+  }
+  return {x0,x1,y0,y1,w:x1-x0,h:y1-y0,cx:(x0+x1)/2,cy:(y0+y1)/2};
+}
+function cupD(){ const v=st.cup.v; return v>=0.985 ? Infinity : 1/(1-v); }
+const LVS = `#version 300 es
+in vec2 aP; in vec3 aC; uniform vec2 uRes; out vec3 vC;
+void main(){ vC=aC; vec2 q=aP/uRes*2.-1.; gl_Position=vec4(q.x,-q.y,0.,1.); }`;
+const LFS = `#version 300 es
+precision highp float; in vec3 vC; uniform float uGain; out vec4 o;
+void main(){ o=vec4(vC*uGain,1.); }`;
+const TFS = `#version 300 es
+precision highp float; in vec2 vUv; out vec4 o; uniform sampler2D uTex; uniform float uBack;
+void main(){ vec3 L=texture(uTex,vUv).rgb/uBack; o=vec4(1.-exp(-L*1.15),1.); }`;
+function initLab(){
+  if(!G) return;
+  const sh=(t,s)=>{const x=gl.createShader(t);gl.shaderSource(x,s);gl.compileShader(x);
+    if(!gl.getShaderParameter(x,gl.COMPILE_STATUS))throw new Error(gl.getShaderInfoLog(x));return x;};
+  const pr=(v,f)=>{const p=gl.createProgram();gl.attachShader(p,sh(gl.VERTEX_SHADER,v));gl.attachShader(p,sh(gl.FRAGMENT_SHADER,f));
+    gl.linkProgram(p);if(!gl.getProgramParameter(p,gl.LINK_STATUS))throw new Error(gl.getProgramInfoLog(p));return p;};
+  G.lp=pr(LVS,LFS); G.tp=pr(PVS,TFS);
+  G.lv=gl.createVertexArray(); G.lb=gl.createBuffer();
+  gl.bindVertexArray(G.lv); gl.bindBuffer(gl.ARRAY_BUFFER,G.lb);
+  const a=gl.getAttribLocation(G.lp,'aP'), c=gl.getAttribLocation(G.lp,'aC');
+  gl.enableVertexAttribArray(a); gl.vertexAttribPointer(a,2,gl.FLOAT,false,20,0);
+  gl.enableVertexAttribArray(c); gl.vertexAttribPointer(c,3,gl.FLOAT,false,20,8);
+}
+let VB=new Float32Array(1<<21), vn=0;
+function addSeg(x1,y1,x2,y2,r,g,b){
+  if(vn+10>VB.length){ const n=new Float32Array(VB.length*2); n.set(VB); VB=n; }
+  VB[vn++]=x1;VB[vn++]=y1;VB[vn++]=r;VB[vn++]=g;VB[vn++]=b;
+  VB[vn++]=x2;VB[vn++]=y2;VB[vn++]=r;VB[vn++]=g;VB[vn++]=b;
+}
+function refract(dx,dy,nx,ny,eta){
+  const ci=-(dx*nx+dy*ny), k=1-eta*eta*(1-ci*ci);
+  if(k<0) return null;
+  const a=eta*ci-Math.sqrt(k); return [eta*dx+a*nx, eta*dy+a*ny];
+}
+function cupBuild(N){
+  const {cx,cy,R}=lab.g, d=cupD(), ux=Math.cos(st.cup.phi), uy=Math.sin(st.cup.phi);
+  const w=[1,.55,.32]; let sum=0;
+  for(let i=0;i<N;i++){
+    let ox,oy,dx,dy;
+    const u=(i+Math.random())/N*2-1;               // 고르게 흩뿌린 광선
+    if(!isFinite(d)){
+      dx=-ux; dy=-uy; const s=u*R;
+      ox=cx+ux*2*R-uy*s; oy=cy+uy*2*R+ux*s;
+    } else {
+      ox=cx+ux*d*R; oy=cy+uy*d*R;
+      const a = d>1.0005 ? Math.asin(1/d) : Math.PI/2*0.998;
+      const th=u*a, c=Math.cos(th), s=Math.sin(th);
+      dx=-ux*c+uy*s; dy=-ux*s-uy*c;
+    }
+    const fx=ox-cx, fy=oy-cy, B=fx*dx+fy*dy, C=fx*fx+fy*fy-R*R, D=B*B-C;
+    if(D<=0) continue;
+    const t=-B+Math.sqrt(D); if(t<=1e-6) continue;
+    let px=ox+dx*t, py=oy+dy*t;
+    for(let k=0;k<st.cup.bounce;k++){
+      const nx=(px-cx)/R, ny=(py-cy)/R, dn=dx*nx+dy*ny;
+      dx-=2*dn*nx; dy-=2*dn*ny;
+      const tt=-2*((px-cx)*dx+(py-cy)*dy);
+      const qx=px+dx*tt, qy=py+dy*tt;
+      addSeg(px,py,qx,qy, w[k], .78*w[k], .50*w[k]);
+      if(k===0) sum+=tt;
+      px=qx; py=qy;
+    }
+  }
+  return 0.32*Math.PI*R*R*DPR/Math.max(sum,1);
+}
+function rodBuild(N){
+  const g=lab.g, R=g.R, rb=st.rod.mode===1, n0=rb?1.333:1.5;
+  const ca=Math.cos(g.ang), sa=Math.sin(g.ang), L=g.len, NB=LAMBDA.length;
+  const S=(x1,y1,x2,y2,c,k)=>addSeg(g.cx+ca*x1-sa*y1, g.cy+sa*x1+ca*y1, g.cx+ca*x2-sa*y2, g.cy+sa*x2+ca*y2, c[0]*k,c[1]*k,c[2]*k);
+  const cols=BAND.map(b=>[b[0]*NB,b[1]*NB,b[2]*NB]);
+  for(let i=0;i<N;i++){
+    const bi=(Math.random()*NB)|0, n=iorOf(n0,st.rod.disp,LAMBDA[bi]), c=cols[bi];
+    const y=((i+Math.random())/N*2-1)*R*0.9995, x1=-Math.sqrt(R*R-y*y);
+    S(g.start,y,x1,y,c,.3);
+    const d1=refract(1,0,x1/R,y/R,1/n); if(!d1) continue;
+    let t=-2*(x1*d1[0]+y*d1[1]);
+    const x2=x1+d1[0]*t, y2=y+d1[1]*t;
+    S(x1,y,x2,y2,c,.45);
+    const n2x=x2/R, n2y=y2/R, d2=refract(d1[0],d1[1],-n2x,-n2y,n);
+    if(!rb){ if(d2) S(x2,y2,x2+d2[0]*L,y2+d2[1]*L,c,1); continue; }
+    if(d2) S(x2,y2,x2+d2[0]*L,y2+d2[1]*L,c,.22);
+    const dn=d1[0]*n2x+d1[1]*n2y, rx=d1[0]-2*dn*n2x, ry=d1[1]-2*dn*n2y;
+    t=-2*(x2*rx+y2*ry);
+    const x3=x2+rx*t, y3=y2+ry*t;
+    S(x2,y2,x3,y3,c,.45);
+    const d3=refract(rx,ry,-x3/R,-y3/R,n); if(!d3) continue;
+    S(x3,y3,x3+d3[0]*L,y3+d3[1]*L,c,1.6);
+  }
+  return 2*R*DPR/N;
+}
+function labReset(){
+  if(st.scene===0) return;
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  ctx.globalCompositeOperation='source-over';
+  const a=area(); vn=0; let gain=1;
+  if(st.scene===1){
+    const R=Math.max(40,0.40*Math.min(a.w,a.h));
+    lab.g={cx:a.cx,cy:a.cy,R};
+    const bg=ctx.createRadialGradient(a.cx,a.cy,R*0.3,a.cx,a.cy,Math.max(W,H));
+    bg.addColorStop(0,'#17110c'); bg.addColorStop(1,'#060403');
+    ctx.fillStyle=bg; ctx.fillRect(0,0,W,H);
+    const cg=ctx.createRadialGradient(a.cx-R*.2,a.cy-R*.2,R*.1,a.cx,a.cy,R);
+    cg.addColorStop(0,'#2a170c'); cg.addColorStop(1,'#140a05');
+    ctx.fillStyle=cg; ctx.beginPath(); ctx.arc(a.cx,a.cy,R,0,7); ctx.fill();
+    const lw=Math.max(6,R*0.07);
+    const rg=ctx.createLinearGradient(a.cx-R,a.cy-R,a.cx+R,a.cy+R);
+    rg.addColorStop(0,'#f4efe6'); rg.addColorStop(1,'#a9a196');
+    ctx.strokeStyle=rg; ctx.lineWidth=lw; ctx.beginPath(); ctx.arc(a.cx,a.cy,R+lw/2,0,7); ctx.stroke();
+    const d=cupD(), ux=Math.cos(st.cup.phi), uy=Math.sin(st.cup.phi);
+    const md = isFinite(d) ? Math.max(R+lw+14, Math.min(d*R+lw, Math.min(W,H)*0.48)) : R+lw+30;
+    const mx=a.cx+ux*md, my=a.cy+uy*md;
+    const sg=ctx.createRadialGradient(mx,my,0,mx,my,16);
+    sg.addColorStop(0,'rgba(255,236,190,1)'); sg.addColorStop(1,'rgba(255,190,110,0)');
+    ctx.fillStyle=sg; ctx.beginPath(); ctx.arc(mx,my,16,0,7); ctx.fill();
+    gain = cupBuild(isMobile ? 30000 : 60000);
+    chip(!isFinite(d) ? '지금 곡선: 네프로이드' : (d<1.02 ? '지금 곡선: 카디오이드(하트)' : '지금 곡선: 둘 사이 어딘가'));
+  } else {
+    const rb = st.rod.mode===1;
+    const portrait = a.h > a.w*1.15;
+    const L = portrait ? a.h : a.w, Wd = portrait ? a.w : a.h;
+    const R = rb ? Math.min(Wd*0.30, L*0.2) : Math.min(Wd*0.28, L*0.15);
+    let along = rb ? 0.12*L : -0.24*L, across = 0;
+    if(st.rod.pos){ along=st.rod.pos[0]; across=st.rod.pos[1]; }
+    along=Math.max(-L/2+R, Math.min(L/2-R, along)); across=Math.max(-Wd/2+R, Math.min(Wd/2-R, across));
+    st.rod.pos=[along,across];
+    const ang = portrait ? Math.PI/2 : 0;
+    const cx = a.cx + Math.cos(ang)*along - Math.sin(ang)*across;
+    const cy = a.cy + Math.sin(ang)*along + Math.cos(ang)*across;
+    lab.g={cx,cy,R,ang,start:-(L/2+along)-40, len:(W+H)*1.5, portrait};
+    ctx.fillStyle='#04060c'; ctx.fillRect(0,0,W,H);
+    const gg=ctx.createRadialGradient(cx-R*.3,cy-R*.3,R*.1,cx,cy,R);
+    gg.addColorStop(0,'rgba(200,225,255,.10)'); gg.addColorStop(1,'rgba(120,160,220,.04)');
+    ctx.fillStyle=gg; ctx.beginPath(); ctx.arc(cx,cy,R,0,7); ctx.fill();
+    ctx.strokeStyle='rgba(200,222,255,.35)'; ctx.lineWidth=1.5; ctx.stroke();
+    gain = rodBuild(isMobile ? 40000 : 90000);
+    chip(rb ? '물방울 · 무지개각 약 42°' : '유리 막대 · 뾰족점(cusp)');
+  }
+  if(!G) return;
+  gl.bindFramebuffer(gl.FRAMEBUFFER,G.fb);
+  gl.viewport(0,0,glc.width,glc.height);
+  gl.clearColor(0,0,0,1); gl.clear(gl.COLOR_BUFFER_BIT);
+  gl.useProgram(G.lp); gl.bindVertexArray(G.lv);
+  gl.bindBuffer(gl.ARRAY_BUFFER,G.lb); gl.bufferData(gl.ARRAY_BUFFER,VB.subarray(0,vn),gl.DYNAMIC_DRAW);
+  gl.uniform2f(gl.getUniformLocation(G.lp,'uRes'),W,H);
+  gl.uniform1f(gl.getUniformLocation(G.lp,'uGain'),gain*G.back);
+  gl.enable(gl.BLEND); gl.blendFunc(gl.ONE,gl.ONE);
+  gl.drawArrays(gl.LINES,0,vn/5);
+  gl.disable(gl.BLEND);
+  gl.bindFramebuffer(gl.FRAMEBUFFER,null);
+  gl.useProgram(G.tp); gl.bindVertexArray(G.qv);
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D,G.tex);
+  gl.uniform1i(gl.getUniformLocation(G.tp,'uTex'),0);
+  gl.uniform1f(gl.getUniformLocation(G.tp,'uBack'),G.back);
+  gl.drawArrays(gl.TRIANGLES,0,3);
+}
+let labDirty=false;
+function labPointer(e){
+  if(!lab.g) return;
+  if(st.scene===1){
+    st.cup.phi=Math.atan2(e.clientY-lab.g.cy, e.clientX-lab.g.cx);
+  } else {
+    const a=area(), dx=e.clientX-a.cx, dy=e.clientY-a.cy;
+    st.rod.pos = lab.g.portrait ? [dy,-dx] : [dx,dy];
+  }
+  labDirty=true;
+}
+
+/* ========== 조절판 ========== */
+const INFO = {
+  w0:['굴절 코스틱스','수영장 바닥의 빛그물','볼록한 물결은 작은 볼록렌즈처럼 빛을 모으고, 오목한 곳은 흩어요. 모인 빛이 바닥에 밝은 그물을 그려요. 화면을 누르거나 문질러 물결을 일으켜 보세요.'],
+  w1:['굴절 + 분산','골판 플라스틱 너머의 햇빛','골이 진 투명판을 지난 빛이 휘어진 밝은 선으로 모여요. 한쪽이 칼처럼 또렷한 이 선이 접힘(fold) 코스틱스예요. 색마다 꺾이는 정도가 달라 무지개 테가 생겨요.'],
+  w2:['굴절 코스틱스','빗방울이 떨어진 물','잔잔한 물에 떨어진 빗방울이 동그란 물결을 만들고, 그 물결이 빛을 모았다 흩었다 하며 움직이는 고리 무늬를 그려요. 화면을 눌러 직접 떨어뜨려 보세요.'],
+  c:['반사 코스틱스','커피잔 속 하트','둥근 잔 벽에 반사된 빛줄기들이 한 곡선을 따라 겹쳐 밝아져요. 빛이 멀면 네프로이드, 빛이 잔 가장자리에 있으면 카디오이드(하트)가 돼요. 화면을 끌어 빛의 방향을 바꿔 보세요.'],
+  r0:['굴절 + 분산','유리 막대가 모은 빛','둥근 유리를 지난 빛은 뒤쪽에서 한 점 근처로 모이며 뾰족점(cusp)을 만들어요. 색마다 모이는 자리가 조금씩 달라 가장자리에 무지개 테가 생겨요. 끌어서 유리를 옮겨 보세요.'],
+  r1:['굴절 + 반사 + 분산','물방울 속 무지개','물방울 안에서 한 번 반사되어 나온 빛은 들어온 방향에서 약 42° 기운 쪽으로 몰려요. 하늘의 무지개는 바로 이 코스틱스예요. 분산을 키우면 색이 더 벌어져요.']
+};
+function setInfo(k){ const v=INFO[k]; $('#itag').textContent=v[0]; $('#ititle').textContent=v[1]; $('#itext').textContent=v[2]; }
+function seg(label, opts, get, set){
+  const r=document.createElement('div'); r.className='row';
+  r.innerHTML=`<div class="lab">${label}</div>`;
+  const s=document.createElement('div'); s.className='seg';
+  opts.forEach((o,i)=>{ const b=document.createElement('button'); b.textContent=o; if(get()===i) b.classList.add('on');
+    b.onclick=()=>{ set(i); [...s.children].forEach((x,j)=>x.classList.toggle('on',j===i)); }; s.appendChild(b); });
+  r.appendChild(s); return r;
+}
+function slider(label, min, max, step, get, set, fmt){
+  const r=document.createElement('div'); r.className='row';
+  r.innerHTML=`<div class="lab"><span>${label}</span><em></em></div>`;
+  const em=r.querySelector('em'), inp=document.createElement('input');
+  inp.type='range'; inp.min=min; inp.max=max; inp.step=step; inp.value=get();
+  em.textContent=fmt(get());
+  inp.oninput=()=>{ set(+inp.value); em.textContent=fmt(+inp.value); };
+  r.appendChild(inp); r._sync=()=>{ inp.value=get(); em.textContent=fmt(get()); }; return r;
+}
+function buildCtrls(){
+  const box=$('#ctrls'); box.innerHTML='';
+  const s=st.scene;
+  if(s===0){
+    const w=st.wave;
+    setInfo('w'+w.surf);
+    box.append(seg('물 표면',['수영장','골판 유리','빗방울'],()=>w.surf,i=>{ w.surf=i; w.disp=SURF_DEF[i].disp; buildCtrls(); }));
+    box.append(slider('물결 세기',0.3,2.2,0.05,()=>w.amp,v=>w.amp=v,v=>v.toFixed(1)+'배'));
+    box.append(slider('바닥까지 깊이',0.4,3,0.05,()=>w.depth,v=>w.depth=v,v=>v<1?'얕게':v<2?'보통':'깊게'));
+    box.append(slider('무지개(분산)',0,14,0.5,()=>w.disp,v=>w.disp=v,v=>v===0?'없음':v<=1.5?'실제 물 정도':'과장 '+v+'배'));
+    box.append(slider('흐르는 속도',0,2,0.05,()=>w.speed,v=>w.speed=v,v=>v===0?'멈춤':v.toFixed(1)+'배'));
+    chip(w.surf===1?'접힘 코스틱스':'');
+  } else if(s===1){
+    const c=st.cup; setInfo('c');
+    box.append(slider('빛까지 거리',0,1,0.005,()=>c.v,v=>{c.v=v;labDirty=true;},v=>{const d=v>=0.985?Infinity:1/(1-v); return !isFinite(d)?'아주 멀리 (햇빛)':d<1.02?'잔 가장자리':'반지름의 '+d.toFixed(1)+'배';}));
+    box.append(seg('반사 횟수',['1번','2번','3번'],()=>c.bounce-1,i=>{c.bounce=i+1;labDirty=true;}));
+  } else {
+    const r=st.rod; setInfo('r'+r.mode);
+    box.append(seg('무엇을 지날까',['유리 막대','물방울'],()=>r.mode,i=>{ r.mode=i; r.pos=null; r.disp=i?2:3; buildCtrls(); labDirty=true; }));
+    box.append(slider('무지개(분산)',0,12,0.5,()=>r.disp,v=>{r.disp=v;labDirty=true;},v=>v===0?'없음 (흰빛)':v<=1?'실제 정도':'과장 '+v+'배'));
+  }
+}
+const HINTS=['화면을 누르면 물방울이 떨어져요','화면을 끌어 빛의 방향을 바꿔 보세요','끌어서 유리를 옮겨 보세요'];
+function setScene(s){
+  st.scene=s;
+  document.querySelectorAll('#bar [data-s]').forEach(b=>b.classList.toggle('on',+b.dataset.s===s));
+  glc.style.display = G ? 'block' : 'none';
+  glc.style.mixBlendMode = s===0 ? 'normal' : 'screen';
+  c2.style.display = s===0 ? 'none' : 'block';
+  $('#nogl').style.display = !G ? 'flex' : 'none';
+  if(s!==0) chip('');
+  buildCtrls(); labDirty=true; hint(HINTS[s]);
+}
+function setPanel(open){
+  panel.classList.toggle('hide',!open); tgl.classList.toggle('on',open);
+  document.body.classList.toggle('closed',!open); labDirty=true;
+}
+document.querySelectorAll('#bar [data-s]').forEach(b=>b.onclick=()=>setScene(+b.dataset.s));
+tgl.onclick=()=>setPanel(panel.classList.contains('hide'));
+
+/* ---------- 입력 ---------- */
+let down=false;
+function onDown(e){ down=true; e.target.setPointerCapture?.(e.pointerId); st.scene===0 ? glPointer(e,true) : labPointer(e); }
+function onMove(e){ if(!down) return; st.scene===0 ? glPointer(e,false) : labPointer(e); }
+function onUp(){ down=false; lastDrop=null; }
+[glc].forEach(c=>{ c.addEventListener('pointerdown',onDown); c.addEventListener('pointermove',onMove);
+  c.addEventListener('pointerup',onUp); c.addEventListener('pointercancel',onUp); });
+
+/* ---------- 크기 ---------- */
+function resize(){
+  W=innerWidth; H=innerHeight;
+  DPR=Math.min(devicePixelRatio||1,2);
+  if(W*H*DPR*DPR>4.2e6) DPR=Math.sqrt(4.2e6/(W*H));
+  c2.width=Math.round(W*DPR); c2.height=Math.round(H*DPR);
+  sizeGL(); labDirty=true;
+}
+addEventListener('resize',resize);
+
+/* ---------- 반복 ---------- */
+let last=performance.now();
+function frame(now){
+  const dt=Math.min(0.05,(now-last)/1000); last=now;
+  if(st.scene===0 && G){
+    simT += dt*st.wave.speed;
+    if(st.wave.surf===2 && simT>nextRain){
+      addDrop((Math.random()*2-1)*view[0]*0.95,(Math.random()*2-1)*view[1]*0.95,0.6+Math.random()*0.7);
+      nextRain=simT+0.35+Math.random()*0.8;
+    }
+    renderGL();
+  } else if(st.scene!==0){
+    if(labDirty){ labDirty=false; labReset(); }
+  }
+  requestAnimationFrame(frame);
+}
+
+initGL(); try{ initLab(); }catch(e){ console.error(e); G=null; }
+resize();
+setPanel(isSide() && W>=1000);
+setScene(0);
+// 처음 열었을 때 물방울 몇 개
+setTimeout(()=>{ addDrop(-0.3*view[0],0.2,1.2); },300);
+setTimeout(()=>{ addDrop(0.35*view[0],-0.25,1); },1100);
+requestAnimationFrame(frame);
+window.__st=st; window.__setScene=setScene; window.__setPanel=setPanel; 
+})();
+</script>
+</body>
+</html>
