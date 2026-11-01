@@ -644,7 +644,7 @@ const GLASSES=[
     info:['굴절 코스틱스','물컵','두꺼운 컵 바닥이 볼록렌즈처럼 햇빛을 모아 그림자 속에 밝은 고리와 점을 만들어요. 얇은 옆벽은 가는 빛줄기를 그려요. 잔을 끌어 기울여 보세요.'] },
   { name:'물 담은 컵', ior:1.42, rb:0.38, h:1.0, rmax:0.42, fill:[0.35,0.08,0.66],
     prof:[[0,0.05,0.05,0],[0.33,0.05,0.05,0],[0.36,0.30,0.022,0],[0.40,1.0,0.018,0]],
-    info:['굴절 코스틱스','물을 담은 컵','물이 차면 컵이 굵은 원기둥 렌즈가 돼요. 햇빛이 한데 모여 그림자 끝에 아주 밝은 빛 띠가 생겨요. 기울이면 띠가 휘고 갈라져요.'] },
+    info:['굴절 코스틱스','물을 담은 컵','물이 차면 컵이 굵은 원기둥 렌즈가 돼요. 잔을 끌어 기울이면 물은 수평을 지키며 찰랑이고, 그때마다 식탁 위 빛 띠가 일렁여요.'] },
   { name:'와인잔', ior:1.5, rb:0.28, h:1.03, rmax:0.34,
     prof:[[0,0.012,0.012,0],[0.28,0.012,0.010,0],[0,0.03,0.022,1],[0,0.40,0.019,0],
           [0,0.42,0.024,1],[0.12,0.44,0.014,0],[0.24,0.52,0.012,0],[0.31,0.66,0.011,0],[0.32,0.82,0.011,0],[0.29,1.02,0.010,0]],
@@ -672,6 +672,7 @@ uniform float uStep;
 uniform mat3 uRot;
 uniform vec3 uPos;
 uniform vec4 uBound;
+uniform vec3 uWP, uWN;
 float sdSeg(vec2 p, vec2 a, vec2 b, float ra, float rb){
   vec2 pa=p-a, ba=b-a; float h=clamp(dot(pa,ba)/max(dot(ba,ba),1e-8),0.,1.);
   return length(pa-ba*h)-mix(ra,rb,h);
@@ -687,13 +688,19 @@ float sdLocal(vec3 p){
     if(b.w>0.5) continue;
     d=min(d,sdSeg(q,a.xy,b.xy,a.z,b.z));
   }
-  if(uFill.w>0.5){
-    vec2 dd=abs(vec2(q.x,q.y-(uFill.y+uFill.z)*.5))-vec2(uFill.x,(uFill.z-uFill.y)*.5);
-    d=min(d,length(max(dd,0.))+min(max(dd.x,dd.y),0.));
+  return d;
+}
+float sdWorld(vec3 p){
+  vec3 q=transpose(uRot)*(p-uPos);
+  float d=sdLocal(q);
+  if(uFill.w>0.5){                                   // 물: 컵 안쪽이면서 수면(세계 수평면) 아래
+    float r=length(q.xz);
+    float dw=max(max(r-uFill.x, uFill.y-q.y), q.y-0.97);
+    dw=max(dw, dot(p-uWP,uWN));
+    d=min(d,dw);
   }
   return d;
 }
-float sdWorld(vec3 p){ return sdLocal(transpose(uRot)*(p-uPos)); }
 vec3 calcNormal(vec3 p){
   const vec2 k=vec2(1.,-1.); float e=7e-4;
   return normalize(k.xyy*sdWorld(p+k.xyy*e)+k.yyx*sdWorld(p+k.yyx*e)+k.yxy*sdWorld(p+k.yxy*e)+k.xxx*sdWorld(p+k.xxx*e));
@@ -917,7 +924,11 @@ function glassState(){
   const L=[-sun[0],-sun[1],-sun[2]];
   let lu=cross3(L,[0,1,0]); if(Math.hypot(...lu)<1e-4) lu=[1,0,0]; lu=norm3(lu);
   const lv=cross3(lu,L);
-  return {gd,sun,el,R,pos,bound:[hc[0],hc[1],hc[2],br],map,lu,lv};
+  let wp=[0,0,0], wn=[0,1,0];
+  if(gd.fill){ const yc=(gd.fill[1]+gd.fill[2])/2;
+    wp=[R[3]*yc+pos[0], R[4]*yc+pos[1], R[5]*yc+pos[2]];          // 컵 축 위의 한 점을 지나는 수면 → 부피가 그대로
+    wn=norm3([Math.tan(SL.s[0]),1,Math.tan(SL.s[1])]); }
+  return {gd,sun,el,R,pos,bound:[hc[0],hc[1],hc[2],br],map,lu,lv,wp,wn};
 }
 function setGlassUniforms(p,S){
   const U=G3.U, gd=S.gd;
@@ -927,6 +938,7 @@ function setGlassUniforms(p,S){
   gl.uniform2f(U(p,'uRib'),...(gd.rib||[0,0])); gl.uniform1f(U(p,'uStep'),0.85);
   gl.uniformMatrix3fv(U(p,'uRot'),false,new Float32Array(S.R));
   gl.uniform3f(U(p,'uPos'),...S.pos); gl.uniform4f(U(p,'uBound'),...S.bound);
+  gl.uniform3f(U(p,'uWP'),...S.wp); gl.uniform3f(U(p,'uWN'),...S.wn);
 }
 function renderCaustics(S,fast){
   const p=G3.cp, U=G3.U, g=st.gls;
@@ -964,17 +976,45 @@ function renderGlassCam(S,scale){
   gl.drawArrays(gl.TRIANGLES,0,3);
   G3.cs=cam;
 }
+/* 출렁임: 수면 기울기 s(세계 기준)는 감쇠 진동, 잔이 기울어지는 가속도에 밀려 흔들림
+   잔 반지름 약 4cm 물컵의 첫 출렁임 진동수 ≈ 3.4Hz (ω² = g·k·tanh(kh), k=1.841/R) */
+const SL={s:[0,0], v:[0,0], pv:[0,0], pt:null, last:0, active:false};
+function sloshStep(now){
+  const g=st.gls, gd=GLASSES[g.g];
+  if(!gd.fill){ SL.s=[0,0]; SL.v=[0,0]; SL.pt=null; SL.active=false; return false; }
+  const dt=Math.min(0.05, SL.last ? (now-SL.last)/1000 : 0.016); SL.last=now;
+  const t=g.tilt;
+  if(!SL.pt){ SL.pt=[t[0],t[1]]; SL.pv=[0,0]; }
+  const cv=[(t[0]-SL.pt[0])/Math.max(dt,1e-3),(t[1]-SL.pt[1])/Math.max(dt,1e-3)];
+  const om=2*Math.PI*3.4, ze=0.07, c=0.9;
+  for(let k=0;k<2;k++){
+    let kick=c*(cv[k]-SL.pv[k]); kick=Math.max(-6,Math.min(6,kick));
+    SL.v[k]+=kick;
+  }
+  SL.pt=[t[0],t[1]]; SL.pv=cv;
+  const n=6, h=dt/n;
+  for(let i=0;i<n;i++) for(let k=0;k<2;k++){
+    SL.v[k]+=(-om*om*SL.s[k]-2*ze*om*SL.v[k])*h; SL.s[k]+=SL.v[k]*h;
+    SL.s[k]=Math.max(-0.4,Math.min(0.4,SL.s[k]));
+  }
+  const was=SL.active;
+  SL.active = Math.abs(SL.s[0])+Math.abs(SL.s[1])>0.0015 || Math.abs(SL.v[0])+Math.abs(SL.v[1])>0.02;
+  if(!SL.active && was){ SL.s=[0,0]; SL.v=[0,0]; G3.causDirty=true; G3.lastAct=now-1000; return false; }
+  return SL.active;
+}
 function glassFrame(now){
   if(!G3) return;
+  if(sloshStep(now)){ G3.causDirty=true; G3.lastAct=now; }
   const S=glassState();
-  if(G3.causDirty){ renderCaustics(S,down); G3.causLow=down; G3.causDirty=false; G3.camDirty=true; }
-  else if(G3.causLow && !down && now-G3.lastAct>150){ renderCaustics(S,false); G3.causLow=false; G3.camDirty=true; }
+  const busy=down||SL.active;
+  if(G3.causDirty){ renderCaustics(S,busy); G3.causLow=busy; G3.causDirty=false; G3.camDirty=true; }
+  else if(G3.causLow && !busy && now-G3.lastAct>150){ renderCaustics(S,false); G3.causLow=false; G3.camDirty=true; }
   if(G3.camDirty){
     const lo=/[?&]lo/.test(location.search);
     const full=lo?0.6:Math.min(1,Math.sqrt(2.4e6/(glc.width*glc.height)));
-    renderGlassCam(S, down ? full*0.5 : full);
-    G3.camDirty=false; G3.needFull=down;
-  } else if(G3.needFull && !down && now-G3.lastAct>200){ G3.camDirty=true; G3.needFull=false; }
+    renderGlassCam(S, busy ? full*0.5 : full);
+    G3.camDirty=false; G3.needFull=busy;
+  } else if(G3.needFull && !busy && now-G3.lastAct>200){ G3.camDirty=true; G3.needFull=false; }
   updateDial(S);
 }
 function glassDirty(){ if(G3){ G3.causDirty=true; G3.lastAct=performance.now(); } }
