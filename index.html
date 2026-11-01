@@ -103,6 +103,10 @@ input[type=range]::-moz-range-thumb{width:22px;height:22px;border-radius:50%;bac
   padding:8px 16px;border-radius:999px;background:rgba(0,0,0,.55);font-size:clamp(13px,1.6vh,16px);color:#fff;
   pointer-events:none;opacity:0;transition:opacity .5s;white-space:nowrap;z-index:3}
 #hint.show{opacity:1}
+#dial{position:fixed;left:12px;bottom:calc(max(12px,env(safe-area-inset-bottom)) + clamp(64px,8vh,84px));z-index:3;display:none;pointer-events:none}
+.seg.pick{flex-wrap:wrap}
+.seg.pick button{flex:1 0 30%}
+button.plain{font:inherit;font-size:13px;min-height:38px;padding:0 12px;white-space:nowrap;border-radius:10px;border:1px solid var(--line);background:transparent;color:var(--ink);cursor:pointer}
 #nogl{position:fixed;inset:0;display:none;align-items:center;justify-content:center;text-align:center;color:var(--mut);padding:24px}
 </style>
 </head>
@@ -114,6 +118,14 @@ input[type=range]::-moz-range-thumb{width:22px;height:22px;border-radius:50%;bac
 <div id="title"><b>빛그물</b><span>코스틱스 감상실</span></div>
 <div id="chip"></div>
 <div id="hint"></div>
+<div id="dial" aria-label="해의 위치"><svg viewBox="0 0 92 92" width="92" height="92">
+  <circle cx="46" cy="46" r="38" fill="rgba(12,15,26,.72)" stroke="rgba(255,255,255,.18)"/>
+  <circle cx="46" cy="46" r="20" fill="none" stroke="rgba(255,255,255,.10)"/>
+  <text x="46" y="86" text-anchor="middle" font-size="9" fill="#9aa3c0">내 쪽</text>
+  <rect x="42" y="42" width="8" height="8" rx="2" fill="rgba(220,235,255,.6)"/>
+  <circle id="sunDot" cx="46" cy="20" r="7" fill="#ffd38a"/>
+  <text id="sunTxt" x="46" y="16" text-anchor="middle" font-size="9" fill="#eef0f8"></text>
+</svg></div>
 
 <div id="panel">
   <div id="info"><div class="tag" id="itag"></div><h2 id="ititle"></h2><p id="itext"></p></div>
@@ -123,7 +135,7 @@ input[type=range]::-moz-range-thumb{width:22px;height:22px;border-radius:50%;bac
 <nav id="bar">
   <button data-s="0" class="on">물결 무늬</button>
   <button data-s="1">커피잔 하트</button>
-  <button data-s="2">유리와 물방울</button>
+  <button data-s="2">유리잔</button>
   <span class="sep"></span>
   <button id="tgl">조절</button>
 </nav>
@@ -138,7 +150,7 @@ const st = {
   scene: 0,
   wave: { surf: 0, amp: 1, depth: 1.6, disp: 0, speed: 1 },
   cup:  { el: 26, az: 192, h: 0.5, drink: 0, hd: 325 },
-  rod:  { mode: 0, disp: 3, pos: null, el: 42 }
+  gls:  { g: 0, el: 38, az: 125, tilt: [0,0], disp: 2, table: 0 }
 };
 const SURF_DEF = [ {disp:0}, {disp:7}, {disp:0} ];
 
@@ -368,64 +380,6 @@ function area(){
   }
   return {x0,x1,y0,y1,w:x1-x0,h:y1-y0,cx:(x0+x1)/2,cy:(y0+y1)/2};
 }
-const LVS = `#version 300 es
-in vec2 aP; in vec3 aC; uniform vec2 uRes; out vec3 vC;
-void main(){ vC=aC; vec2 q=aP/uRes*2.-1.; gl_Position=vec4(q.x,-q.y,0.,1.); }`;
-const LFS = `#version 300 es
-precision highp float; in vec3 vC; uniform float uGain; out vec4 o;
-void main(){ o=vec4(vC*uGain,1.); }`;
-const TFS = `#version 300 es
-precision highp float; in vec2 vUv; out vec4 o; uniform sampler2D uTex; uniform float uBack;
-void main(){ vec3 L=texture(uTex,vUv).rgb/uBack; o=vec4(1.-exp(-L*1.15),1.); }`;
-function initLab(){
-  if(!G) return;
-  const sh=(t,s)=>{const x=gl.createShader(t);gl.shaderSource(x,s);gl.compileShader(x);
-    if(!gl.getShaderParameter(x,gl.COMPILE_STATUS))throw new Error(gl.getShaderInfoLog(x));return x;};
-  const pr=(v,f)=>{const p=gl.createProgram();gl.attachShader(p,sh(gl.VERTEX_SHADER,v));gl.attachShader(p,sh(gl.FRAGMENT_SHADER,f));
-    gl.linkProgram(p);if(!gl.getProgramParameter(p,gl.LINK_STATUS))throw new Error(gl.getProgramInfoLog(p));return p;};
-  G.lp=pr(LVS,LFS); G.tp=pr(PVS,TFS);
-  G.lv=gl.createVertexArray(); G.lb=gl.createBuffer();
-  gl.bindVertexArray(G.lv); gl.bindBuffer(gl.ARRAY_BUFFER,G.lb);
-  const a=gl.getAttribLocation(G.lp,'aP'), c=gl.getAttribLocation(G.lp,'aC');
-  gl.enableVertexAttribArray(a); gl.vertexAttribPointer(a,2,gl.FLOAT,false,20,0);
-  gl.enableVertexAttribArray(c); gl.vertexAttribPointer(c,3,gl.FLOAT,false,20,8);
-}
-let VB=new Float32Array(1<<21), vn=0;
-function addSeg(x1,y1,x2,y2,r,g,b){
-  if(vn+10>VB.length){ const n=new Float32Array(VB.length*2); n.set(VB); VB=n; }
-  VB[vn++]=x1;VB[vn++]=y1;VB[vn++]=r;VB[vn++]=g;VB[vn++]=b;
-  VB[vn++]=x2;VB[vn++]=y2;VB[vn++]=r;VB[vn++]=g;VB[vn++]=b;
-}
-function refract(dx,dy,nx,ny,eta){
-  const ci=-(dx*nx+dy*ny), k=1-eta*eta*(1-ci*ci);
-  if(k<0) return null;
-  const a=eta*ci-Math.sqrt(k); return [eta*dx+a*nx, eta*dy+a*ny];
-}
-function rodBuild(N){
-  const g=lab.g, R=g.R, rb=st.rod.mode===2, n0=rb?1.333:1.5;
-  const ca=Math.cos(g.ang), sa=Math.sin(g.ang), L=g.len, NB=LAMBDA.length;
-  const S=(x1,y1,x2,y2,c,k)=>addSeg(g.cx+ca*x1-sa*y1, g.cy+sa*x1+ca*y1, g.cx+ca*x2-sa*y2, g.cy+sa*x2+ca*y2, c[0]*k,c[1]*k,c[2]*k);
-  const cols=BAND.map(b=>[b[0]*NB,b[1]*NB,b[2]*NB]);
-  for(let i=0;i<N;i++){
-    const bi=(Math.random()*NB)|0, n=iorOf(n0,st.rod.disp,LAMBDA[bi]), c=cols[bi];
-    const y=((i+Math.random())/N*2-1)*R*0.9995, x1=-Math.sqrt(R*R-y*y);
-    S(g.start,y,x1,y,c,.3);
-    const d1=refract(1,0,x1/R,y/R,1/n); if(!d1) continue;
-    let t=-2*(x1*d1[0]+y*d1[1]);
-    const x2=x1+d1[0]*t, y2=y+d1[1]*t;
-    S(x1,y,x2,y2,c,.45);
-    const n2x=x2/R, n2y=y2/R, d2=refract(d1[0],d1[1],-n2x,-n2y,n);
-    if(!rb){ if(d2) S(x2,y2,x2+d2[0]*L,y2+d2[1]*L,c,1); continue; }
-    if(d2) S(x2,y2,x2+d2[0]*L,y2+d2[1]*L,c,.22);
-    const dn=d1[0]*n2x+d1[1]*n2y, rx=d1[0]-2*dn*n2x, ry=d1[1]-2*dn*n2y;
-    t=-2*(x2*rx+y2*ry);
-    const x3=x2+rx*t, y3=y2+ry*t;
-    S(x2,y2,x3,y3,c,.45);
-    const d3=refract(rx,ry,-x3/R,-y3/R,n); if(!d3) continue;
-    S(x3,y3,x3+d3[0]*L,y3+d3[1]*L,c,1.6);
-  }
-  return 2*R*DPR/N;
-}
 /* ---------- 머그잔: 햇빛 → 잔 안쪽 벽에서 반사 → 음료 표면 (3D 광선 추적) ---------- */
 const MUG={T:58*Math.PI/180, Hc:1.9, rO:1.08};
 const DRINK=[[0.20,0.11,0.06],[0.62,0.42,0.25],[0.93,0.91,0.86]];
@@ -587,235 +541,406 @@ function drawMug(a){
   ctx.fillStyle=sg; ctx.beginPath(); ctx.arc(sx,sy,22,0,7); ctx.fill();
   chip(`해 높이 ${Math.round(c.el)}° · 반사 코스틱스`);
 }
-/* ---------- 식탁 위 유리 막대: 단면(y-z 평면)에서 광선을 굴절시켜 식탁 위 밝기를 계산 ---------- */
-const ROD={T:50*Math.PI/180, B:14*Math.PI/180, Lr:3.0};
-const TABLE=[0.93,0.90,0.84];
-function schlick(c,n){ const r0=((n-1)/(n+1))**2; return r0+(1-r0)*Math.pow(1-Math.max(0,Math.min(1,c)),5); }
-function rodTrace(p, el, n){            // 단면 좌표: 막대 중심 (0,1), 반지름 1, 식탁 z=0
-  const dy=-Math.cos(el), dz=-Math.sin(el), qy=-dz, qz=dy;
-  const s=Math.sqrt(Math.max(0,1-p*p));
-  const ey=qy*p-dy*s, ez=1+qz*p-dz*s;     // 들어가는 점
-  const n1y=ey, n1z=ez-1;
-  const d1=refract(dy,dz,n1y,n1z,1/n); if(!d1) return null;
-  const t=-2*(n1y*d1[0]+n1z*d1[1]);
-  const xy=ey+d1[0]*t, xz=ez+d1[1]*t, n2y=xy, n2z=xz-1;
-  const d2=refract(d1[0],d1[1],-n2y,-n2z,n); if(!d2) return null;
-  const T=(1-schlick(-(dy*n1y+dz*n1z),n))*(1-schlick(d2[0]*n2y+d2[1]*n2z,n));
-  if(d2[1]>=-1e-6) return null;
-  const t3=-xz/d2[1];
-  return {e:[ey,ez], x:[xy,xz], d2, y:xy+d2[0]*t3, T};
-}
-function rodProfile(){
-  const r=st.rod, el=r.el*Math.PI/180, key=[r.el,r.disp].join();
-  if(lab.rp && lab.rpKey===key) return lab.rp;
-  const Ymax=Math.min(14, 2.6/Math.tan(el)+2.5), NB=900, bw=2*Ymax/NB;
-  const base=new Float32Array(NB).fill(1);
-  // 막대가 가린 곳(그림자): 막대를 지나지 않았다면 닿았을 자리
-  const dy=-Math.cos(el), dz=-Math.sin(el), qy=-dz, qz=dy;
-  const ys=p=>{ const t=(1+qz*p)/(-dz); return qy*p+dy*t; };
-  const a0=Math.min(ys(-1),ys(1)), a1=Math.max(ys(-1),ys(1));
-  for(let k=0;k<NB;k++){ const y=Ymax-(k+0.5)*bw; if(y>=a0&&y<=a1) base[k]=0; }
-  const rgb=[new Float32Array(NB),new Float32Array(NB),new Float32Array(NB)];
-  const Nr=isMobile?14000:26000, rho=Nr/2, norm=1/(rho*Math.sin(el)*bw);
-  let best=-1, bestY=0; const tot=new Float32Array(NB);
-  LAMBDA.forEach((l,i)=>{
-    const n=iorOf(1.5,r.disp,l), c=BAND[i];
-    for(let j=0;j<Nr;j++){
-      const p=((j+Math.random())/Nr)*2-1, h=rodTrace(p,el,n); if(!h) continue;
-      const k=Math.floor((Ymax-h.y)/bw); if(k<0||k>=NB) continue;
-      const v=h.T*norm; rgb[0][k]+=c[0]*v; rgb[1][k]+=c[1]*v; rgb[2][k]+=c[2]*v; tot[k]+=v/LAMBDA.length;
-    }
-  });
-  for(let k=1;k<NB-1;k++) if(tot[k]>best){ best=tot[k]; bestY=Ymax-(k+0.5)*bw; }
-  const cv=document.createElement('canvas'); cv.width=2; cv.height=NB;
-  const cc=cv.getContext('2d'), img=cc.createImageData(2,NB), d=img.data;
-  for(let k=0;k<NB;k++){
-    for(let ch=0;ch<3;ch++){
-      const sm=(rgb[ch][Math.max(0,k-1)]+2*rgb[ch][k]+rgb[ch][Math.min(NB-1,k+1)])/4;
-      const L=base[k]+sm, v=255*(1-Math.exp(-1.5*TABLE[ch]*(0.28+0.85*L)));
-      d[k*8+ch]=d[k*8+4+ch]=v;
-    }
-    d[k*8+3]=d[k*8+7]=255;
-  }
-  cc.putImageData(img,0,0);
-  lab.rp={cv,Ymax,NB,bestY,peak:best}; lab.rpKey=key;
-  return lab.rp;
-}
-function drawRodTable(a){
-  const r=st.rod, el=r.el*Math.PI/180, T=ROD.T, sT=Math.sin(T), cT=Math.cos(T), cb=Math.cos(ROD.B), sb=Math.sin(ROD.B), Lr=ROD.Lr;
-  const S=Math.max(18, Math.min(a.w*0.78/(2*Lr*cb+2*sb+1), a.h/8.5));
-  const cx=a.cx, cy=a.y0+a.h*0.30;
-  const P=(x,y,z)=>{ const X=x*cb+y*sb, Y=-x*sb+y*cb; return [cx+S*X, cy-S*(Y*sT+z*cT)]; };
-  lab.g={S};
-  // 식탁 (햇빛 받은 밝기)
-  const lit=TABLE.map(t=>Math.round(255*(1-Math.exp(-1.5*t*(0.28+0.85)))));
-  ctx.fillStyle=`rgb(${lit.join(',')})`; ctx.fillRect(0,0,W,H);
-  // 막대 그림자 + 모인 빛 (계산한 밝기 띠를 식탁 위에 비스듬히 깔기)
-  const pr=rodProfile(), NB=pr.NB, Y0=pr.Ymax, ay=-2*Y0/NB, ax=Lr;   // 이미지 폭 2px → x 범위 2Lr
-  const o=P(-Lr,Y0,0);
-  ctx.save();
-  ctx.transform(S*cb*ax, S*sT*sb*ax, S*sb*ay, -S*sT*cb*ay, o[0], o[1]);
-  ctx.imageSmoothingEnabled=true; ctx.drawImage(pr.cv,0,0);
-  ctx.restore();
-  // 가장자리 어둡게
-  const vg=ctx.createRadialGradient(W/2,H/2,Math.min(W,H)*0.3,W/2,H/2,Math.max(W,H)*0.75);
-  vg.addColorStop(0,'rgba(0,0,0,0)'); vg.addColorStop(1,'rgba(40,30,20,.35)');
-  ctx.fillStyle=vg; ctx.fillRect(0,0,W,H);
-  // 유리 막대
-  const pts=[]; for(const x of [-Lr,Lr]) for(let i=0;i<72;i++){ const f=i/72*Math.PI*2; pts.push(P(x,Math.sin(f),1+Math.cos(f))); }
-  const hull=(ps)=>{ ps=ps.slice().sort((u,v)=>u[0]-v[0]||u[1]-v[1]); const cr=(o,a,b)=>(a[0]-o[0])*(b[1]-o[1])-(a[1]-o[1])*(b[0]-o[0]);
-    const lo=[],up=[]; for(const p of ps){ while(lo.length>1&&cr(lo[lo.length-2],lo[lo.length-1],p)<=0) lo.pop(); lo.push(p); }
-    for(const p of ps.slice().reverse()){ while(up.length>1&&cr(up[up.length-2],up[up.length-1],p)<=0) up.pop(); up.push(p); }
-    return lo.slice(0,-1).concat(up.slice(0,-1)); };
-  const hp=hull(pts);
-  ctx.beginPath(); hp.forEach((q,j)=>j?ctx.lineTo(q[0],q[1]):ctx.moveTo(q[0],q[1])); ctx.closePath();
-  const top=P(0,0,2), bot=P(0,0,0);
-  const gg=ctx.createLinearGradient(top[0],top[1],bot[0],bot[1]);
-  gg.addColorStop(0,'rgba(215,235,250,.26)'); gg.addColorStop(.55,'rgba(235,245,252,.06)'); gg.addColorStop(1,'rgba(170,200,225,.22)');
-  ctx.fillStyle=gg; ctx.fill();
-  ctx.strokeStyle='rgba(120,150,180,.55)'; ctx.lineWidth=1.2; ctx.stroke();
-  // 햇빛 반사 하이라이트
-  const vx=-(cT*(-sb)), vy=-(cT*cb), vz=sT;            // 눈 쪽 방향 (단면 성분만 사용)
-  let hy=Math.cos(el)+vy, hz=Math.sin(el)+vz; const hl=Math.hypot(hy,hz); hy/=hl; hz/=hl;
-  const h1=P(-Lr*0.97,hy,1+hz), h2=P(Lr*0.97,hy,1+hz);
-  ctx.strokeStyle='rgba(255,255,255,.9)'; ctx.lineWidth=Math.max(2,S*0.06); ctx.lineCap='round';
-  ctx.beginPath(); ctx.moveTo(h1[0],h1[1]); ctx.lineTo(h2[0],h2[1]); ctx.stroke();
-  const k1=P(-Lr*0.97,hy*0.6,1+hz*0.6+0.25), k2=P(Lr*0.97,hy*0.6,1+hz*0.6+0.25);
-  ctx.strokeStyle='rgba(255,255,255,.35)'; ctx.lineWidth=Math.max(1,S*0.025);
-  ctx.beginPath(); ctx.moveTo(k1[0],k1[1]); ctx.lineTo(k2[0],k2[1]); ctx.stroke();
-  // 가까운 쪽 끝면
-  ctx.beginPath(); for(let i=0;i<=72;i++){ const f=i/72*Math.PI*2, q=P(Lr,Math.sin(f),1+Math.cos(f)); i?ctx.lineTo(q[0],q[1]):ctx.moveTo(q[0],q[1]); }
-  ctx.fillStyle='rgba(220,238,250,.30)'; ctx.fill(); ctx.strokeStyle='rgba(255,255,255,.75)'; ctx.lineWidth=1.5; ctx.stroke();
-  // 해 표시
-  const sp=P(-Lr*0.2, 2.2*Math.cos(el)+1, 1+2.2*Math.sin(el));
-  let sx=Math.max(a.x0+24,Math.min(a.x1-24,sp[0])), sy=Math.max(a.y0+24,Math.min(a.y1-24,sp[1]));
-  const sg=ctx.createRadialGradient(sx,sy,0,sx,sy,22);
-  sg.addColorStop(0,'rgba(255,248,220,1)'); sg.addColorStop(.45,'rgba(255,214,140,.85)'); sg.addColorStop(1,'rgba(255,190,110,0)');
-  ctx.fillStyle=sg; ctx.beginPath(); ctx.arc(sx,sy,22,0,7); ctx.fill();
-  // 모인 빛줄기 이름표
-  ctx.font=`600 ${Math.round(Math.max(13,Math.min(17,S*0.32)))}px system-ui,sans-serif`; ctx.textBaseline='middle';
-  const tw=ctx.measureText('모인 빛줄기').width;
-  let lp=P(Lr+0.15, pr.bestY, 0), tp=P(Lr+0.9, pr.bestY-0.5, 0), al='left';
-  if(tp[0]+tw+16>a.x1){ lp=P(-Lr-0.15, pr.bestY, 0); tp=P(-Lr-0.9, pr.bestY-0.5, 0); al='right'; }
-  if(al==='right' && tp[0]-tw-16<a.x0){ lp=P(Lr*0.3, pr.bestY, 0); tp=[lp[0], lp[1]+Math.max(60,S*1.6)]; al='center'; }
-  ctx.strokeStyle='rgba(40,30,20,.6)'; ctx.lineWidth=1.2;
-  ctx.beginPath(); ctx.moveTo(lp[0],lp[1]); ctx.lineTo(tp[0],tp[1]); ctx.stroke();
-  const bx0 = al==='left' ? tp[0]+2 : al==='right' ? tp[0]-tw-14 : tp[0]-tw/2-6;
-  const fh=Math.max(13,Math.min(17,S*0.32))+10;
-  ctx.fillStyle='rgba(255,252,245,.9)'; ctx.beginPath(); ctx.roundRect(bx0, tp[1]-fh/2, tw+12, fh, fh/2); ctx.fill();
-  ctx.fillStyle='#2b2118'; ctx.textAlign='left'; ctx.fillText('모인 빛줄기', bx0+6, tp[1]);
-  drawRodInset(a, el, pr);
-  chip(`해 높이 ${Math.round(r.el)}° · 빛이 한 줄로 모여요`);
-}
-function drawRodInset(a, el, pr){
-  const bw=Math.min(280, Math.max(160, a.w*0.3)), bh=bw*0.62, bx=a.x0+14, by=a.y1-bh-10;
-  ctx.save();
-  ctx.fillStyle='rgba(12,16,28,.82)'; ctx.beginPath(); ctx.roundRect(bx,by,bw,bh,12); ctx.fill();
-  ctx.beginPath(); ctx.roundRect(bx,by,bw,bh,12); ctx.clip();
-  const rr=bh*0.17, ty=by+bh-22, rx=bx+bw*0.64;
-  const M=(y,z)=>[rx+y*rr, ty-z*rr];
-  const dy=-Math.cos(el), dz=-Math.sin(el), qy=-dz, qz=dy, n=1.5;
-  ctx.strokeStyle='rgba(255,238,200,.5)'; ctx.lineWidth=1;
-  for(let i=-8;i<=8;i++){
-    const p=i/8*0.97*(Math.abs(i)<=7?1:1);
-    const s=Math.sqrt(1-p*p), ey=qy*p-dy*s, ez=1+qz*p-dz*s;
-    const st0=M(ey-dy*12, ez-dz*12), h=rodTrace(p,el,n); if(!h) continue;
-    ctx.beginPath(); ctx.moveTo(st0[0],st0[1]);
-    const e=M(h.e[0],h.e[1]), x=M(h.x[0],h.x[1]), g=M(h.y,0);
-    ctx.lineTo(e[0],e[1]); ctx.lineTo(x[0],x[1]); ctx.lineTo(g[0],g[1]); ctx.stroke();
-  }
-  ctx.strokeStyle='rgba(255,238,200,.3)';
-  for(const p of [-2.4,-1.8,-1.3,1.3,1.8,2.4]){
-    const oy=qy*p, oz=1+qz*p, t=oz/(-dz), a1=M(oy-dy*12,oz-dz*12), b1=M(oy+dy*t,0);
-    ctx.beginPath(); ctx.moveTo(a1[0],a1[1]); ctx.lineTo(b1[0],b1[1]); ctx.stroke();
-  }
-  const c0=M(0,1);
-  ctx.fillStyle='rgba(190,220,250,.22)'; ctx.strokeStyle='rgba(220,236,255,.8)'; ctx.lineWidth=1.3;
-  ctx.beginPath(); ctx.arc(c0[0],c0[1],rr,0,7); ctx.fill(); ctx.stroke();
-  ctx.strokeStyle='rgba(230,215,190,.8)'; ctx.lineWidth=2;
-  ctx.beginPath(); ctx.moveTo(bx,ty); ctx.lineTo(bx+bw,ty); ctx.stroke();
-  const fp=M(pr.bestY,0), fg=ctx.createRadialGradient(fp[0],fp[1],0,fp[0],fp[1],9);
-  fg.addColorStop(0,'rgba(255,255,240,1)'); fg.addColorStop(1,'rgba(255,230,160,0)');
-  ctx.fillStyle=fg; ctx.beginPath(); ctx.arc(fp[0],fp[1],9,0,7); ctx.fill();
-  ctx.fillStyle='#eef0f8'; ctx.font='600 12px system-ui,sans-serif'; ctx.textBaseline='top';
-  ctx.fillText('옆에서 본 모습', bx+10, by+8);
-  ctx.fillStyle='#9aa3c0'; ctx.font='11px system-ui,sans-serif'; ctx.textBaseline='bottom';
-  ctx.fillText('← 내 쪽', bx+8, by+bh-5);
-  ctx.textAlign='right'; ctx.fillText('해 쪽 →', bx+bw-8, by+bh-5);
-  ctx.restore();
-}
 function labReset(){
-  if(st.scene===0) return;
+  if(st.scene!==1) return;
   ctx.setTransform(DPR,0,0,DPR,0,0);
   ctx.globalCompositeOperation='source-over';
-  const a=area(); vn=0; let gain=1;
-  if(st.scene===1){
-    drawMug(a);
-    if(G){ gl.bindFramebuffer(gl.FRAMEBUFFER,null); gl.viewport(0,0,glc.width,glc.height); gl.clearColor(0,0,0,1); gl.clear(gl.COLOR_BUFFER_BIT); }
-    return;
-  } else if(st.rod.mode===0){
-    drawRodTable(a);
-    if(G){ gl.bindFramebuffer(gl.FRAMEBUFFER,null); gl.viewport(0,0,glc.width,glc.height); gl.clearColor(0,0,0,1); gl.clear(gl.COLOR_BUFFER_BIT); }
-    return;
-  } else {
-    const rb = st.rod.mode===2;
-    const portrait = a.h > a.w*1.15;
-    const L = portrait ? a.h : a.w, Wd = portrait ? a.w : a.h;
-    const R = rb ? Math.min(Wd*0.30, L*0.2) : Math.min(Wd*0.28, L*0.15);
-    let along = rb ? 0.12*L : -0.24*L, across = 0;
-    if(st.rod.pos){ along=st.rod.pos[0]; across=st.rod.pos[1]; }
-    along=Math.max(-L/2+R, Math.min(L/2-R, along)); across=Math.max(-Wd/2+R, Math.min(Wd/2-R, across));
-    st.rod.pos=[along,across];
-    const ang = portrait ? Math.PI/2 : 0;
-    const cx = a.cx + Math.cos(ang)*along - Math.sin(ang)*across;
-    const cy = a.cy + Math.sin(ang)*along + Math.cos(ang)*across;
-    lab.g={cx,cy,R,ang,start:-(L/2+along)-40, len:(W+H)*1.5, portrait};
-    ctx.fillStyle='#04060c'; ctx.fillRect(0,0,W,H);
-    const gg=ctx.createRadialGradient(cx-R*.3,cy-R*.3,R*.1,cx,cy,R);
-    gg.addColorStop(0,'rgba(200,225,255,.10)'); gg.addColorStop(1,'rgba(120,160,220,.04)');
-    ctx.fillStyle=gg; ctx.beginPath(); ctx.arc(cx,cy,R,0,7); ctx.fill();
-    ctx.strokeStyle='rgba(200,222,255,.35)'; ctx.lineWidth=1.5; ctx.stroke();
-    gain = rodBuild(isMobile ? 40000 : 90000);
-    chip(rb ? '물방울 · 무지개각 약 42°' : '유리 막대 · 뾰족점(cusp)');
-  }
-  if(!G) return;
-  gl.bindFramebuffer(gl.FRAMEBUFFER,G.fb);
-  gl.viewport(0,0,glc.width,glc.height);
-  gl.clearColor(0,0,0,1); gl.clear(gl.COLOR_BUFFER_BIT);
-  gl.useProgram(G.lp); gl.bindVertexArray(G.lv);
-  gl.bindBuffer(gl.ARRAY_BUFFER,G.lb); gl.bufferData(gl.ARRAY_BUFFER,VB.subarray(0,vn),gl.DYNAMIC_DRAW);
-  gl.uniform2f(gl.getUniformLocation(G.lp,'uRes'),W,H);
-  gl.uniform1f(gl.getUniformLocation(G.lp,'uGain'),gain*G.back);
-  gl.enable(gl.BLEND); gl.blendFunc(gl.ONE,gl.ONE);
-  gl.drawArrays(gl.LINES,0,vn/5);
-  gl.disable(gl.BLEND);
-  gl.bindFramebuffer(gl.FRAMEBUFFER,null);
-  gl.useProgram(G.tp); gl.bindVertexArray(G.qv);
-  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D,G.tex);
-  gl.uniform1i(gl.getUniformLocation(G.tp,'uTex'),0);
-  gl.uniform1f(gl.getUniformLocation(G.tp,'uBack'),G.back);
-  gl.drawArrays(gl.TRIANGLES,0,3);
+  drawMug(area());
+  if(G){ gl.bindFramebuffer(gl.FRAMEBUFFER,null); gl.viewport(0,0,glc.width,glc.height); gl.clearColor(0,0,0,1); gl.clear(gl.COLOR_BUFFER_BIT); }
 }
 let labDirty=false;
 function labPointer(e){
   if(!lab.g) return;
-  if(st.scene===1){
-    const c=st.cup;
-    if(e.type==='pointerdown'){ lab.last=[e.clientX,e.clientY]; return; }
-    const ddx=e.clientX-lab.last[0], ddy=e.clientY-lab.last[1]; lab.last=[e.clientX,e.clientY];
-    c.az=((c.az-ddx*0.4)%360+360)%360;
-    c.el=Math.max(6,Math.min(70,c.el-ddy*0.15));
-    (c.rows||[]).forEach(r=>r._sync());
-  } else if(st.rod.mode===0){
-    if(e.type==='pointerdown'){ lab.last=[e.clientX,e.clientY]; return; }
-    const ddy=e.clientY-lab.last[1]; lab.last=[e.clientX,e.clientY];
-    st.rod.el=Math.max(12,Math.min(80,st.rod.el-ddy*0.2));
-    (st.rod.rows||[]).forEach(r=>r._sync());
-  } else {
-    const a=area(), dx=e.clientX-a.cx, dy=e.clientY-a.cy;
-    st.rod.pos = lab.g.portrait ? [dy,-dx] : [dx,dy];
-  }
+  const c=st.cup;
+  if(e.type==='pointerdown'){ lab.last=[e.clientX,e.clientY]; return; }
+  const ddx=e.clientX-lab.last[0], ddy=e.clientY-lab.last[1]; lab.last=[e.clientX,e.clientY];
+  c.az=((c.az-ddx*0.4)%360+360)%360;
+  c.el=Math.max(6,Math.min(70,c.el-ddy*0.15));
+  (c.rows||[]).forEach(r=>r._sync());
   labDirty=true;
+}
+
+/* ========== 3. 유리잔 갤러리 — 화면은 광선 추적, 식탁 위 빛은 '빛 격자'로 계산 ========== */
+const GLASSES=[
+  { name:'물컵', ior:1.5, rb:0.38, h:1.0, rmax:0.42,
+    prof:[[0,0.05,0.05,0],[0.33,0.05,0.05,0],[0.36,0.30,0.022,0],[0.40,1.0,0.018,0]],
+    info:['굴절 코스틱스','물컵','두꺼운 컵 바닥이 볼록렌즈처럼 햇빛을 모아 그림자 속에 밝은 고리와 점을 만들어요. 얇은 옆벽은 가는 빛줄기를 그려요. 잔을 끌어 기울여 보세요.'] },
+  { name:'물 담은 컵', ior:1.42, rb:0.38, h:1.0, rmax:0.42, fill:[0.35,0.08,0.66],
+    prof:[[0,0.05,0.05,0],[0.33,0.05,0.05,0],[0.36,0.30,0.022,0],[0.40,1.0,0.018,0]],
+    info:['굴절 코스틱스','물을 담은 컵','물이 차면 컵이 굵은 원기둥 렌즈가 돼요. 햇빛이 한데 모여 그림자 끝에 아주 밝은 빛 띠가 생겨요. 기울이면 띠가 휘고 갈라져요.'] },
+  { name:'와인잔', ior:1.5, rb:0.28, h:1.03, rmax:0.34,
+    prof:[[0,0.012,0.012,0],[0.28,0.012,0.010,0],[0,0.03,0.022,1],[0,0.40,0.019,0],
+          [0,0.42,0.024,1],[0.12,0.44,0.014,0],[0.24,0.52,0.012,0],[0.31,0.66,0.011,0],[0.32,0.82,0.011,0],[0.29,1.02,0.010,0]],
+    info:['굴절 + 반사','와인잔','얇고 둥근 볼이 빛을 이리저리 휘게 해서 그림자 속에 가는 빛 곡선들이 겹쳐요. 가는 다리는 작은 막대 렌즈처럼 빛줄기 하나를 그어요.'] },
+  { name:'브랜디잔', ior:1.5, rb:0.25, h:0.91, rmax:0.41,
+    prof:[[0,0.012,0.012,0],[0.25,0.012,0.010,0],[0,0.03,0.026,1],[0,0.16,0.022,0],
+          [0,0.18,0.022,1],[0.20,0.22,0.012,0],[0.35,0.36,0.011,0],[0.40,0.55,0.011,0],[0.35,0.75,0.011,0],[0.24,0.90,0.010,0]],
+    info:['굴절 코스틱스','브랜디잔','공처럼 부푼 볼이 커다란 렌즈 노릇을 해요. 그림자 속에 뾰족점이 있는 밝은 곡선이 생기고, 해가 낮을수록 길게 늘어나요.'] },
+  { name:'크리스털 잔', ior:1.55, rb:0.40, h:0.80, rmax:0.46, rib:[12,0],
+    prof:[[0,0.07,0.07,0],[0.33,0.07,0.07,0],[0.37,0.40,0.035,0],[0.40,0.78,0.03,0]],
+    info:['굴절 + 분산','크리스털 잔','깎아 낸 면 하나하나가 작은 프리즘이에요. 빛이 여러 갈래로 나뉘어 그림자 둘레에 빛살과 무지개 조각이 흩어져요.'] },
+  { name:'유리구슬', ior:1.5, rb:0, h:0.64, rmax:0.32, noTilt:true,
+    prof:[[0,0.32,0.32,0],[0,0.32,0.32,0]],
+    info:['굴절 코스틱스','유리구슬','속이 꽉 찬 공은 아주 강한 볼록렌즈예요. 그림자 한가운데 눈부신 한 점으로 빛이 모이고, 그 둘레로 빛 고리가 생겨요.'] }
+];
+const L6=[440,480,515,550,590,640];
+const B6=(()=>{ const c=L6.map(wlRGB), s=[0,0,0]; c.forEach(v=>{s[0]+=v[0];s[1]+=v[1];s[2]+=v[2];}); return c.map(v=>[v[0]/s[0],v[1]/s[1],v[2]/s[2]]); })();
+let G3=null;
+const GCOMMON=`
+uniform vec4 uProf[12];
+uniform int uNP;
+uniform vec4 uFill;
+uniform vec2 uRib;
+uniform float uStep;
+uniform mat3 uRot;
+uniform vec3 uPos;
+uniform vec4 uBound;
+float sdSeg(vec2 p, vec2 a, vec2 b, float ra, float rb){
+  vec2 pa=p-a, ba=b-a; float h=clamp(dot(pa,ba)/max(dot(ba,ba),1e-8),0.,1.);
+  return length(pa-ba*h)-mix(ra,rb,h);
+}
+float sdLocal(vec3 p){
+  float r=length(p.xz);
+  if(uRib.x>0.){ float sg=6.2831853/uRib.x, th=atan(p.z,p.x), tl=mod(th+sg*.5,sg)-sg*.5; r*=cos(tl); }   // 깎은 면(평면)
+  vec2 q=vec2(r,p.y);
+  float d=1e9;
+  for(int i=1;i<12;i++){
+    if(i>=uNP) break;
+    vec4 a=uProf[i-1], b=uProf[i];
+    if(b.w>0.5) continue;
+    d=min(d,sdSeg(q,a.xy,b.xy,a.z,b.z));
+  }
+  if(uFill.w>0.5){
+    vec2 dd=abs(vec2(q.x,q.y-(uFill.y+uFill.z)*.5))-vec2(uFill.x,(uFill.z-uFill.y)*.5);
+    d=min(d,length(max(dd,0.))+min(max(dd.x,dd.y),0.));
+  }
+  return d;
+}
+float sdWorld(vec3 p){ return sdLocal(transpose(uRot)*(p-uPos)); }
+vec3 calcNormal(vec3 p){
+  const vec2 k=vec2(1.,-1.); float e=7e-4;
+  return normalize(k.xyy*sdWorld(p+k.xyy*e)+k.yyx*sdWorld(p+k.yyx*e)+k.yxy*sdWorld(p+k.yxy*e)+k.xxx*sdWorld(p+k.xxx*e));
+}
+float fres(float c, float n){ float r0=(n-1.)/(n+1.); r0*=r0; return r0+(1.-r0)*pow(1.-clamp(c,0.,1.),5.); }
+// 구 경계와 만나는 구간
+vec2 boundHit(vec3 ro, vec3 rd){
+  vec3 oc=ro-uBound.xyz; float b=dot(oc,rd), c=dot(oc,oc)-uBound.w*uBound.w, h=b*b-c;
+  if(h<0.) return vec2(-1.);
+  h=sqrt(h); return vec2(max(-b-h,0.),-b+h);
+}
+// 유리 표면까지 행진. inside면 유리 안에서 바깥 경계까지.
+float marchGlass(vec3 ro, vec3 rd, bool inside, float tmax){
+  float t=0., d=1.;
+  for(int i=0;i<160;i++){
+    d=sdWorld(ro+rd*t); if(inside) d=-d;
+    if(d<3e-4 && t>1.5e-3) return t;
+    t+=max(d*uStep,2.5e-4);
+    if(t>tmax) return -1.;
+  }
+  return (d<4e-3 && t>1.5e-3) ? t : -1.;
+}
+`;
+const CVS=`#version 300 es
+precision highp float;
+in vec2 aGrid;
+${GCOMMON}
+uniform vec3 uSun, uLu, uLv; uniform float uLR, uIor; uniform vec3 uMap;
+out vec2 vOld; out vec2 vNew; out float vT;
+void main(){
+  vec2 g=(aGrid*2.-1.)*uLR;
+  vec3 ro=uBound.xyz+uLu*g.x+uLv*g.y+uSun*(uBound.w*2.2);
+  vec3 rd=-uSun; float T=1.; bool ok=true; bool inside=false;
+  vec2 bh=boundHit(ro,rd);
+  if(bh.y>0.){
+    ro+=rd*bh.x;
+    for(int k=0;k<10;k++){
+      vec2 b2=boundHit(ro,rd);
+      float tm = inside ? 4.*uBound.w : max(b2.y,0.);
+      float t = tm>0. ? marchGlass(ro,rd,inside,tm) : -1.;
+      if(t<0.){ if(inside) ok=false; break; }
+      vec3 p=ro+rd*t, n=calcNormal(p), nn=inside?-n:n;
+      float ci=-dot(rd,nn);
+      vec3 r=refract(rd,nn,inside?uIor:1./uIor);
+      if(dot(r,r)<1e-6){ rd=reflect(rd,nn); }
+      else { T*=1.-fres(ci,uIor); rd=r; inside=!inside; }
+      ro=p+rd*2e-3;
+    }
+    if(inside) ok=false;
+  }
+  vec2 hit=vec2(0.);
+  if(ok && rd.y<-1e-4 && ro.y>-1e-3){ hit=(ro+rd*(-ro.y/rd.y)).xz; } else ok=false;
+  vOld=g; vNew=hit; vT= ok ? T : -1e6;
+  gl_Position = ok ? vec4((hit-uMap.xy)/uMap.z,0.,1.) : vec4(9.,9.,0.,1.);
+}`;
+const CFS=`#version 300 es
+precision highp float;
+in vec2 vOld; in vec2 vNew; in float vT;
+uniform vec3 uCol; uniform float uSinEl;
+out vec4 o;
+void main(){
+  if(vT<0.) discard;
+  vec2 ax=dFdx(vOld), ay=dFdy(vOld), bx=dFdx(vNew), by=dFdy(vNew);
+  float a0=abs(ax.x*ay.y-ax.y*ay.x), a1=abs(bx.x*by.y-bx.y*by.x);
+  float I=min(a0/max(a1,1e-14)/uSinEl,60.)*vT;
+  o=vec4(uCol*I,1.);
+}`;
+const RFS=`#version 300 es
+precision highp float;
+in vec2 vUv; out vec4 o;
+${GCOMMON}
+uniform vec3 uCamPos, uCamR, uCamU, uCamF; uniform vec4 uTan;
+uniform vec3 uSun; uniform float uSinEl, uIor, uCausBack;
+uniform sampler2D uCaus; uniform vec3 uMap; uniform int uTable; uniform vec3 uLu, uLv; uniform float uLR;
+vec3 env(vec3 rd){
+  float y=rd.y;
+  vec3 top=vec3(.07,.08,.11), hor=vec3(.50,.47,.43), bot=vec3(.20,.18,.16);
+  vec3 c= y>0. ? mix(hor,top,pow(clamp(y,0.,1.),.55)) : mix(hor,bot,pow(clamp(-y,0.,1.),.5));
+  // 창문처럼 넓고 부드러운 빛 (반사가 예쁘게 보이도록)
+  vec3 wd=normalize(vec3(-uSun.x,0.35,-uSun.z)*vec3(1.,1.,1.));
+  float w=max(dot(rd,normalize(vec3(uSun.x*.6,.55,uSun.z*.6))),0.);
+  c+=vec3(.9,.92,1.)*smoothstep(.86,.97,w)*.9;
+  float s=max(dot(rd,uSun),0.);
+  c+=vec3(1.,.93,.80)*(pow(s,3000.)*120.+pow(s,90.)*.8+pow(s,8.)*.06);
+  return c;
+}
+vec3 tableAlb(vec2 p){
+  if(uTable==1){                                 // 밝은 나무
+    float g=sin(p.x*26.+sin(p.y*2.1)*1.6+sin(p.x*3.7+p.y*.9)*1.2)*.5+.5;
+    float plank=smoothstep(.0,.02,abs(fract(p.x*1.25)-.5)-.48);
+    return mix(vec3(.66,.47,.30),vec3(.74,.55,.36),g*.6)*(1.-.25*(1.-plank))*(.97+.03*sin(p.x*140.));
+  }
+  if(uTable==2){                                 // 검은 돌
+    float g=sin(p.x*3.1+sin(p.y*2.3)*1.5)*sin(p.y*2.7+sin(p.x*1.9))*.5+.5;
+    return vec3(.055,.058,.065)*(1.+.25*g);
+  }
+  float wv=sin(p.x*260.)*sin(p.y*260.);          // 흰 천
+  return vec3(.86,.84,.80)*(.97+.03*wv);
+}
+vec3 tableCol(vec3 p){
+  vec2 uv=(p.xz-uMap.xy)/uMap.z*.5+.5;
+  vec3 L=vec3(1.);
+  vec2 gq=vec2(dot(p-uBound.xyz,uLu),dot(p-uBound.xyz,uLv));      // 빛 격자 안쪽인지
+  float inG=1.-smoothstep(uLR*.9,uLR*.98,max(abs(gq.x),abs(gq.y)));
+  if(inG>0.&&uv.x>0.&&uv.y>0.&&uv.x<1.&&uv.y<1.){ vec2 tx=.5/vec2(textureSize(uCaus,0));
+    vec3 cs=(texture(uCaus,uv+tx).rgb+texture(uCaus,uv-tx).rgb+texture(uCaus,uv+vec2(tx.x,-tx.y)).rgb+texture(uCaus,uv+vec2(-tx.x,tx.y)).rgb)*.25;
+    L=mix(L,cs/uCausBack,inG); }
+  float ao=1.;
+  if(length(p-uBound.xyz)<uBound.w+.3){ float d=sdWorld(p+vec3(0.,.02,0.)); ao=mix(.45,1.,smoothstep(0.,.14,d)); }
+  vec3 col=tableAlb(p.xz)*(L*vec3(1.,.95,.86)*1.75*uSinEl + vec3(.40,.44,.52)*.55*ao);
+  float f=smoothstep(3.5,11.,length(p.xz));
+  return mix(col,vec3(.50,.47,.43)*.9,f);
+}
+vec3 envOrTable(vec3 rd, vec3 p){
+  if(rd.y<-1e-3){ float t=-p.y/rd.y; return tableCol(p+rd*t); }
+  return env(rd);
+}
+vec3 render(vec3 ro, vec3 rd){
+  vec3 acc=vec3(0.), thr=vec3(1.);
+  bool inside=false;
+  for(int k=0;k<12;k++){
+    float tt= rd.y<-1e-5 ? -ro.y/rd.y : 1e9;
+    float tg=-1.;
+    if(inside) tg=marchGlass(ro,rd,true,4.*uBound.w);
+    else { vec2 b=boundHit(ro,rd); if(b.y>0.){ float t=marchGlass(ro+rd*b.x,rd,false,b.y-b.x); if(t>=0.) tg=t+b.x; } }
+    if(tg<0. || (!inside && tt<tg)){
+      if(inside) return acc+thr*env(rd);
+      return acc+thr*(tt<1e8 ? tableCol(ro+rd*tt) : env(rd));
+    }
+    vec3 p=ro+rd*tg, n=calcNormal(p), nn=inside?-n:n;
+    float ci=clamp(-dot(rd,nn),0.,1.), F=fres(ci,uIor);
+    vec3 rl=reflect(rd,nn);
+    if(inside) thr*=exp(-tg*vec3(.12,.03,.08));
+    vec3 r=refract(rd,nn,inside?uIor:1./uIor);
+    if(dot(r,r)<1e-6){ rd=rl; ro=p+rd*2e-3; continue; }
+    if(!inside) acc+=thr*F*envOrTable(rl,p+rl*2e-3);
+    thr*=1.-F; rd=r; inside=!inside; ro=p+rd*2e-3;
+  }
+  return acc+thr*vec3(.66,.64,.60);   // 안에서 끝없이 반사되는 빛은 주변 평균 밝기로
+}
+void main(){
+  vec2 uv=vUv*2.-1.;
+  vec3 rd=normalize(uCamF+uCamR*((uv.x-uTan.z)*uTan.x)+uCamU*((uv.y-uTan.w)*uTan.y));
+  vec3 c=render(uCamPos,rd);
+  vec2 q=vUv-.5; c*=1.-.35*dot(q,q);
+  c=1.-exp(-c*1.05);
+  o=vec4(pow(c,vec3(1./2.2)),1.);
+}`;
+const BFS=`#version 300 es
+precision highp float;
+in vec2 vUv; out vec4 o; uniform sampler2D uTex; uniform vec2 uScale;
+void main(){ o=texture(uTex,vUv*uScale); }`;
+function initGlass(){
+  if(!G) return;
+  const sh=(t,s)=>{const x=gl.createShader(t);gl.shaderSource(x,s);gl.compileShader(x);
+    if(!gl.getShaderParameter(x,gl.COMPILE_STATUS))throw new Error(gl.getShaderInfoLog(x));return x;};
+  const pr=(v,f)=>{const p=gl.createProgram();gl.attachShader(p,sh(gl.VERTEX_SHADER,v));gl.attachShader(p,sh(gl.FRAGMENT_SHADER,f));
+    gl.linkProgram(p);if(!gl.getProgramParameter(p,gl.LINK_STATUS))throw new Error(gl.getProgramInfoLog(p));return p;};
+  G3={ cp:pr(CVS,CFS), rp:pr(PVS,RFS), bp:pr(PVS,BFS), causDirty:true, camDirty:true, needFull:false, lastAct:0 };
+  const lo=/[?&]lo/.test(location.search);
+  G3.N = lo ? 110 : (isMobile ? 210 : 330);
+  G3.CM = lo ? 384 : (isMobile ? 768 : 1280);
+  // 빛 격자
+  const N=G3.N, pos=new Float32Array((N+1)*(N+1)*2); let k=0;
+  for(let j=0;j<=N;j++) for(let i=0;i<=N;i++){ pos[k++]=i/N; pos[k++]=j/N; }
+  const idx=new Uint32Array(N*N*6); k=0;
+  for(let j=0;j<N;j++) for(let i=0;i<N;i++){ const a=j*(N+1)+i,b=a+1,c=a+N+1,d=c+1; idx[k++]=a;idx[k++]=b;idx[k++]=c;idx[k++]=b;idx[k++]=d;idx[k++]=c; }
+  G3.count=idx.length;
+  G3.va=gl.createVertexArray(); gl.bindVertexArray(G3.va);
+  const vb=gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER,vb); gl.bufferData(gl.ARRAY_BUFFER,pos,gl.STATIC_DRAW);
+  const la=gl.getAttribLocation(G3.cp,'aGrid'); gl.enableVertexAttribArray(la); gl.vertexAttribPointer(la,2,gl.FLOAT,false,0,0);
+  const ib=gl.createBuffer(); gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,ib); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,idx,gl.STATIC_DRAW);
+  const mk=(w,h,flt)=>{ const t=gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D,t);
+    if(flt) gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA16F,w,h,0,gl.RGBA,gl.HALF_FLOAT,null);
+    else gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,w,h,0,gl.RGBA,gl.UNSIGNED_BYTE,null);
+    gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
+    const f=gl.createFramebuffer(); gl.bindFramebuffer(gl.FRAMEBUFFER,f); gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,gl.TEXTURE_2D,t,0);
+    gl.bindFramebuffer(gl.FRAMEBUFFER,null); return {t,f,w,h}; };
+  G3.mk=mk;
+  G3.caus=mk(G3.CM,G3.CM,G.float); G3.back=G.float?1:0.08;
+  G3.u={}; const U=(p,n)=>gl.getUniformLocation(p,n);
+  G3.U=U;
+}
+function glassCam(){
+  const a=area(), asp=W/H;
+  const tgt=[0,0.40,-0.30], dist=3.7, ce=25*Math.PI/180;
+  const pos=[tgt[0], tgt[1]+dist*Math.sin(ce), tgt[2]-dist*Math.cos(ce)];
+  const f=norm3(sub3(tgt,pos)), r=norm3(cross3(f,[0,1,0])), u=cross3(r,f);
+  let ty, tx;
+  const fw=a.w/W, fh=a.h/H;                      // 비어 있는 화면 비율
+  if(a.w/a.h>=1){ ty=Math.tan(15.5*Math.PI/180)/fh; tx=ty*asp; } else { tx=Math.tan(16*Math.PI/180)/fw; ty=tx/asp; }
+  const sx=(a.cx/W)*2-1, sy=1-(a.cy/H)*2;
+  return {pos,f,r,u,tx,ty,sx,sy};
+}
+function sub3(a,b){return [a[0]-b[0],a[1]-b[1],a[2]-b[2]];}
+function dot3(a,b){return a[0]*b[0]+a[1]*b[1]+a[2]*b[2];}
+function cross3(a,b){return [a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];}
+function norm3(a){const l=Math.hypot(a[0],a[1],a[2])||1;return [a[0]/l,a[1]/l,a[2]/l];}
+function glassState(){
+  const g=st.gls, gd=GLASSES[g.g];
+  const el=g.el*Math.PI/180, az=g.az*Math.PI/180;
+  const sun=[Math.cos(el)*Math.cos(az), Math.sin(el), Math.cos(el)*Math.sin(az)];
+  let tx=g.tilt[0], tz=g.tilt[1]; if(gd.noTilt){ tx=0; tz=0; }
+  const ang=Math.hypot(tx,tz);
+  let R=[1,0,0, 0,1,0, 0,0,1];                       // 열 우선(column-major)
+  if(ang>1e-5){
+    const ax=[tz/ang,0,-tx/ang], c=Math.cos(ang), s=Math.sin(ang), t=1-c, [x,y,z]=ax;
+    const m=[[t*x*x+c, t*x*y-s*z, t*x*z+s*y],[t*x*y+s*z, t*y*y+c, t*y*z-s*x],[t*x*z-s*y, t*y*z+s*x, t*z*z+c]];
+    R=[m[0][0],m[1][0],m[2][0], m[0][1],m[1][1],m[2][1], m[0][2],m[1][2],m[2][2]];
+  }
+  const lift=gd.rb*Math.sin(ang)+0.002;
+  const pos=[0,lift,0];
+  const hc=[R[3]*gd.h/2, R[4]*gd.h/2+lift, R[5]*gd.h/2];
+  const br=Math.hypot(gd.h/2, gd.rmax)+0.04;
+  // 식탁에 깔 빛 지도 범위
+  const sxz=Math.hypot(sun[0],sun[2])||1e-6, dirx=-sun[0]/sxz, dirz=-sun[2]/sxz;
+  const Ls=Math.min(9,(hc[1]+br)/Math.tan(el));
+  const half=Math.min(9,(Ls*0.5+br)*1.08+0.15);
+  const map=[hc[0]+dirx*Ls*0.5, hc[2]+dirz*Ls*0.5, half];
+  const L=[-sun[0],-sun[1],-sun[2]];
+  let lu=cross3(L,[0,1,0]); if(Math.hypot(...lu)<1e-4) lu=[1,0,0]; lu=norm3(lu);
+  const lv=cross3(lu,L);
+  return {gd,sun,el,R,pos,bound:[hc[0],hc[1],hc[2],br],map,lu,lv};
+}
+function setGlassUniforms(p,S){
+  const U=G3.U, gd=S.gd;
+  const prof=new Float32Array(48); gd.prof.forEach((q,i)=>prof.set(q,i*4));
+  gl.uniform4fv(U(p,'uProf[0]'),prof); gl.uniform1i(U(p,'uNP'),gd.prof.length);
+  gl.uniform4f(U(p,'uFill'),...(gd.fill?[...gd.fill,1]:[0,0,0,0]));
+  gl.uniform2f(U(p,'uRib'),...(gd.rib||[0,0])); gl.uniform1f(U(p,'uStep'),0.85);
+  gl.uniformMatrix3fv(U(p,'uRot'),false,new Float32Array(S.R));
+  gl.uniform3f(U(p,'uPos'),...S.pos); gl.uniform4f(U(p,'uBound'),...S.bound);
+}
+function renderCaustics(S,fast){
+  const p=G3.cp, U=G3.U, g=st.gls;
+  gl.bindFramebuffer(gl.FRAMEBUFFER,G3.caus.f); gl.viewport(0,0,G3.CM,G3.CM);
+  gl.clearColor(0,0,0,0); gl.clear(gl.COLOR_BUFFER_BIT);
+  gl.useProgram(p); gl.bindVertexArray(G3.va);
+  setGlassUniforms(p,S);
+  gl.uniform3f(U(p,'uSun'),...S.sun); gl.uniform3f(U(p,'uLu'),...S.lu); gl.uniform3f(U(p,'uLv'),...S.lv);
+  gl.uniform1f(U(p,'uLR'),S.bound[3]*1.04); gl.uniform3f(U(p,'uMap'),...S.map);
+  gl.uniform1f(U(p,'uSinEl'),Math.sin(S.el));
+  gl.enable(gl.BLEND); gl.blendFunc(gl.ONE,gl.ONE);
+  const b=G3.back, uI=U(p,'uIor'), uC=U(p,'uCol');
+  if(g.disp<=0||fast){ gl.uniform1f(uI,S.gd.ior); gl.uniform3f(uC,b,b,b); gl.drawElements(gl.TRIANGLES,G3.count,gl.UNSIGNED_INT,0); }
+  else L6.forEach((l,i)=>{ gl.uniform1f(uI,iorOf(S.gd.ior,g.disp,l)); gl.uniform3f(uC,B6[i][0]*b,B6[i][1]*b,B6[i][2]*b); gl.drawElements(gl.TRIANGLES,G3.count,gl.UNSIGNED_INT,0); });
+  gl.disable(gl.BLEND);
+}
+function renderGlassCam(S,scale){
+  const p=G3.rp, U=G3.U, g=st.gls, cam=glassCam();
+  const w=Math.max(16,Math.round(glc.width*scale)), h=Math.max(16,Math.round(glc.height*scale));
+  if(!G3.cam || G3.cam.w!==glc.width || G3.cam.h!==glc.height) G3.cam=G3.mk(glc.width,glc.height,false);
+  gl.bindFramebuffer(gl.FRAMEBUFFER,G3.cam.f); gl.viewport(0,0,w,h);
+  gl.useProgram(p); gl.bindVertexArray(G.qv);
+  setGlassUniforms(p,S);
+  gl.uniform3f(U(p,'uCamPos'),...cam.pos); gl.uniform3f(U(p,'uCamR'),...cam.r); gl.uniform3f(U(p,'uCamU'),...cam.u); gl.uniform3f(U(p,'uCamF'),...cam.f);
+  gl.uniform4f(U(p,'uTan'),cam.tx,cam.ty,cam.sx,cam.sy);
+  gl.uniform3f(U(p,'uSun'),...S.sun); gl.uniform1f(U(p,'uSinEl'),Math.sin(S.el)); gl.uniform1f(U(p,'uIor'),S.gd.ior);
+  gl.uniform1f(U(p,'uCausBack'),G3.back); gl.uniform3f(U(p,'uMap'),...S.map); gl.uniform1i(U(p,'uTable'),g.table);
+  gl.uniform3f(U(p,'uLu'),...S.lu); gl.uniform3f(U(p,'uLv'),...S.lv); gl.uniform1f(U(p,'uLR'),S.bound[3]*1.04);
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D,G3.caus.t); gl.uniform1i(U(p,'uCaus'),0);
+  gl.drawArrays(gl.TRIANGLES,0,3);
+  gl.bindFramebuffer(gl.FRAMEBUFFER,null); gl.viewport(0,0,glc.width,glc.height);
+  gl.useProgram(G3.bp); gl.bindVertexArray(G.qv);
+  gl.bindTexture(gl.TEXTURE_2D,G3.cam.t); gl.uniform1i(U(G3.bp,'uTex'),0);
+  gl.uniform2f(U(G3.bp,'uScale'),w/glc.width,h/glc.height);
+  gl.drawArrays(gl.TRIANGLES,0,3);
+  G3.cs=cam;
+}
+function glassFrame(now){
+  if(!G3) return;
+  const S=glassState();
+  if(G3.causDirty){ renderCaustics(S,down); G3.causLow=down; G3.causDirty=false; G3.camDirty=true; }
+  else if(G3.causLow && !down && now-G3.lastAct>150){ renderCaustics(S,false); G3.causLow=false; G3.camDirty=true; }
+  if(G3.camDirty){
+    const lo=/[?&]lo/.test(location.search);
+    const full=lo?0.6:Math.min(1,Math.sqrt(2.4e6/(glc.width*glc.height)));
+    renderGlassCam(S, down ? full*0.5 : full);
+    G3.camDirty=false; G3.needFull=down;
+  } else if(G3.needFull && !down && now-G3.lastAct>200){ G3.camDirty=true; G3.needFull=false; }
+  updateDial(S);
+}
+function glassDirty(){ if(G3){ G3.causDirty=true; G3.lastAct=performance.now(); } }
+function projectPt(p){
+  const c=G3&&G3.cs; if(!c) return null;
+  const d=sub3(p,c.pos), z=dot3(d,c.f), x=dot3(d,c.r)/z/c.tx+c.sx, y=dot3(d,c.u)/z/c.ty+c.sy;
+  return [(x+1)/2*W,(1-y)/2*H, z];
+}
+function glassPointer(e){
+  const g=st.gls;
+  if(e.type==='pointerdown'){
+    const S=glassState(), c=projectPt(S.bound.slice(0,3));
+    let onGlass=false;
+    if(c){ const rpx=S.bound[3]/c[2]/G3.cs.ty*H/2; onGlass=Math.hypot(e.clientX-c[0],e.clientY-c[1])<rpx*0.85; }
+    G3.drag={mode:onGlass && !GLASSES[g.g].noTilt ?'tilt':'sun', x:e.clientX, y:e.clientY};
+    if(G3.drag.mode==='tilt') hint('잔을 기울이는 중'); 
+    return;
+  }
+  if(!G3.drag) return;
+  const dx=e.clientX-G3.drag.x, dy=e.clientY-G3.drag.y; G3.drag.x=e.clientX; G3.drag.y=e.clientY;
+  if(G3.drag.mode==='tilt'){
+    // 화면 오른쪽 = cam.r, 화면 안쪽 = 카메라 앞 방향의 수평 성분
+    const c=G3.cs, fr=norm3([c.f[0],0,c.f[2]]), k=0.006;
+    let tx=g.tilt[0]+(c.r[0]*dx - fr[0]*dy)*k, tz=g.tilt[1]+(c.r[2]*dx - fr[2]*dy)*k;
+    const m=Math.hypot(tx,tz), mx=50*Math.PI/180; if(m>mx){ tx*=mx/m; tz*=mx/m; }
+    g.tilt=[tx,tz];
+  } else {
+    g.az=((g.az+dx*0.35)%360+360)%360;
+    g.el=Math.max(8,Math.min(80,g.el-dy*0.18));
+    (g.rows||[]).forEach(r=>r._sync());
+  }
+  glassDirty();
+}
+function updateDial(S){
+  const d=$('#dial'); if(!d) return;
+  const c=G3.cs; if(!c) return;
+  // 화면 기준: 오른쪽 = cam.r 수평, 위쪽(안쪽) = 카메라 앞 수평
+  const fr=norm3([c.f[0],0,c.f[2]]), rr=norm3([c.r[0],0,c.r[2]]);
+  const sx=S.sun[0]*rr[0]+S.sun[2]*rr[2], sz=S.sun[0]*fr[0]+S.sun[2]*fr[2], l=Math.hypot(sx,sz)||1;
+  const rad=34*(1-st.gls.el/90);
+  d.querySelector('#sunDot').setAttribute('cx',(46+sx/l*rad).toFixed(1));
+  d.querySelector('#sunDot').setAttribute('cy',(46-sz/l*rad).toFixed(1));
+  d.querySelector('#sunTxt').textContent=Math.round(st.gls.el)+'°';
 }
 
 /* ========== 조절판 ========== */
@@ -823,12 +948,9 @@ const INFO = {
   w0:['굴절 코스틱스','수영장 바닥의 빛그물','볼록한 물결은 작은 볼록렌즈처럼 빛을 모으고, 오목한 곳은 흩어요. 모인 빛이 바닥에 밝은 그물을 그려요. 화면을 누르거나 문질러 물결을 일으켜 보세요.'],
   w1:['굴절 + 분산','골판 플라스틱 너머의 햇빛','골이 진 투명판을 지난 빛이 휘어진 밝은 선으로 모여요. 한쪽이 칼처럼 또렷한 이 선이 접힘(fold) 코스틱스예요. 색마다 꺾이는 정도가 달라 무지개 테가 생겨요.'],
   w2:['굴절 코스틱스','빗방울이 떨어진 물','잔잔한 물에 떨어진 빗방울이 동그란 물결을 만들고, 그 물결이 빛을 모았다 흩었다 하며 움직이는 고리 무늬를 그려요. 화면을 눌러 직접 떨어뜨려 보세요.'],
-  c:['반사 코스틱스','커피잔 속 하트','비스듬한 햇빛이 잔 안쪽 벽에 반사되어 음료 위로 모이면 하트 모양 곡선이 생겨요. 잔이 투명하지 않아도 안쪽이 반들반들하면 돼요. 화면을 끌어 해를 옮겨 보세요.'],
-  r0:['굴절 + 분산','식탁 위 유리 막대','속이 꽉 찬 투명한 유리 막대는 길쭉한 볼록렌즈예요. 햇빛을 한 줄로 모아 그림자 한가운데에 밝은 빛줄기를 그려요. 위아래로 끌어 해 높이를 바꾸면 빛줄기가 움직이고 굵기가 변해요.'],
-  r1:['굴절 + 분산','유리 막대를 자른 면','막대를 옆에서 자른 모습이에요. 평행하게 들어온 빛이 막대 뒤에서 모이며 뾰족점(cusp)을 만들어요. 막대가 길쭉하니 실제로는 점이 아니라 한 줄로 모여요. 끌어서 옮겨 보세요.'],
-  r2:['굴절 + 반사 + 분산','물방울 속 무지개','물방울 안에서 한 번 반사되어 나온 빛은 들어온 방향에서 약 42° 기운 쪽으로 몰려요. 하늘의 무지개는 바로 이 코스틱스예요. 분산을 키우면 색이 더 벌어져요.']
+  c:['반사 코스틱스','커피잔 속 하트','비스듬한 햇빛이 잔 안쪽 벽에 반사되어 음료 위로 모이면 하트 모양 곡선이 생겨요. 잔이 투명하지 않아도 안쪽이 반들반들하면 돼요. 화면을 끌어 해를 옮겨 보세요.']
 };
-function setInfo(k){ const v=INFO[k]; $('#itag').textContent=v[0]; $('#ititle').textContent=v[1]; $('#itext').textContent=v[2]; }
+function setInfo(k){ const v=Array.isArray(k)?k:INFO[k]; $('#itag').textContent=v[0]; $('#ititle').textContent=v[1]; $('#itext').textContent=v[2]; }
 function seg(label, opts, get, set){
   const r=document.createElement('div'); r.className='row';
   r.innerHTML=`<div class="lab">${label}</div>`;
@@ -869,35 +991,47 @@ function buildCtrls(){
     box.append(seg('음료',['블랙커피','라떼','우유'],()=>c.drink,i=>{c.drink=i;labDirty=true;}));
     box.append(slider('손잡이 방향',0,359,1,()=>Math.round(c.hd),v=>{c.hd=v;labDirty=true;},v=>DIR[Math.round(v/45)%8]));
   } else {
-    const r=st.rod; setInfo('r'+r.mode);
-    box.append(seg('보기',['식탁 위 막대','막대 자른 면','물방울'],()=>r.mode,i=>{ r.mode=i; r.pos=null; r.disp=i===2?2:3; buildCtrls(); labDirty=true; hint(i===0?'위아래로 끌어 해 높이를 바꿔 보세요':'끌어서 옮겨 보세요'); }));
-    if(r.mode===0){ const r1=slider('해 높이',12,80,1,()=>Math.round(r.el),v=>{r.el=v;labDirty=true;},v=>Math.round(v)+'°'); r.rows=[r1]; box.append(r1); }
-    box.append(slider('무지개(분산)',0,12,0.5,()=>r.disp,v=>{r.disp=v;labDirty=true;},v=>v===0?'없음 (흰빛)':v<=1?'실제 정도':'과장 '+v+'배'));
+    const g=st.gls, gd=GLASSES[g.g]; setInfo(gd.info);
+    const r0=document.createElement('div'); r0.className='row';
+    r0.innerHTML='<div class="lab">유리잔 고르기</div>';
+    const pk=document.createElement('div'); pk.className='seg pick';
+    GLASSES.forEach((q,i)=>{ const b=document.createElement('button'); b.textContent=q.name; if(i===g.g) b.classList.add('on');
+      b.onclick=()=>{ g.g=i; g.tilt=[0,0]; buildCtrls(); glassDirty(); }; pk.appendChild(b); });
+    r0.appendChild(pk); box.append(r0);
+    const r1=slider('해 높이',8,80,1,()=>Math.round(g.el),v=>{g.el=v;glassDirty();},v=>Math.round(v)+'°'+(v<18?' (해 질 녘)':v>60?' (한낮)':''));
+    g.rows=[r1]; box.append(r1);
+    box.append(slider('무지개(분산)',0,8,0.5,()=>g.disp,v=>{g.disp=v;glassDirty();},v=>v===0?'없음 (흰빛)':v<=1?'실제 유리 정도':'과장 '+v+'배'));
+    const tr=seg('식탁',['흰 천','나무','검은 돌'],()=>g.table,i=>{g.table=i;if(G3)G3.camDirty=true;});
+    const rb=document.createElement('button'); rb.className='plain'; rb.textContent='잔 세우기';
+    rb.onclick=()=>{ g.tilt=[0,0]; glassDirty(); };
+    const sg=tr.querySelector('.seg'); sg.style.flex='1'; const line=document.createElement('div'); line.style.cssText='display:flex;gap:6px;align-items:stretch';
+    sg.replaceWith(line); line.append(sg,rb); box.append(tr);
+    chip(gd.noTilt?'유리구슬은 굴려도 모양이 같아요':'');
   }
 }
-const HINTS=['화면을 누르면 물방울이 떨어져요','화면을 끌어 해의 방향과 높이를 바꿔 보세요','위아래로 끌어 해 높이를 바꿔 보세요'];
+const HINTS=['화면을 누르면 물방울이 떨어져요','화면을 끌어 해의 방향과 높이를 바꿔 보세요','잔을 끌면 기울고, 빈 곳을 끌면 해가 움직여요'];
 function setScene(s){
   st.scene=s;
   document.querySelectorAll('#bar [data-s]').forEach(b=>b.classList.toggle('on',+b.dataset.s===s));
   glc.style.display = G ? 'block' : 'none';
-  glc.style.mixBlendMode = s===0 ? 'normal' : 'screen';
-  c2.style.display = s===0 ? 'none' : 'block';
+  glc.style.mixBlendMode = s===1 ? 'screen' : 'normal';
+  c2.style.display = s===1 ? 'block' : 'none';
   $('#nogl').style.display = !G ? 'flex' : 'none';
   if(s!==0) chip('');
-  buildCtrls(); labDirty=true; hint(s===2 && st.rod.mode!==0 ? '끌어서 옮겨 보세요' : HINTS[s]);
+  buildCtrls(); labDirty=true; glassDirty(); $('#dial').style.display=s===2?'block':'none'; hint(HINTS[s]);
 }
 function setPanel(open){
   panel.classList.toggle('hide',!open); tgl.classList.toggle('on',open);
-  document.body.classList.toggle('closed',!open); labDirty=true;
+  document.body.classList.toggle('closed',!open); labDirty=true; if(G3) G3.camDirty=true;
 }
 document.querySelectorAll('#bar [data-s]').forEach(b=>b.onclick=()=>setScene(+b.dataset.s));
 tgl.onclick=()=>setPanel(panel.classList.contains('hide'));
 
 /* ---------- 입력 ---------- */
 let down=false;
-function onDown(e){ down=true; e.target.setPointerCapture?.(e.pointerId); st.scene===0 ? glPointer(e,true) : labPointer(e); }
-function onMove(e){ if(!down) return; st.scene===0 ? glPointer(e,false) : labPointer(e); }
-function onUp(){ down=false; lastDrop=null; }
+function onDown(e){ down=true; e.target.setPointerCapture?.(e.pointerId); st.scene===0 ? glPointer(e,true) : st.scene===1 ? labPointer(e) : glassPointer(e); }
+function onMove(e){ if(!down) return; st.scene===0 ? glPointer(e,false) : st.scene===1 ? labPointer(e) : glassPointer(e); }
+function onUp(){ down=false; lastDrop=null; if(G3){ G3.drag=null; G3.lastAct=performance.now(); } }
 [glc].forEach(c=>{ c.addEventListener('pointerdown',onDown); c.addEventListener('pointermove',onMove);
   c.addEventListener('pointerup',onUp); c.addEventListener('pointercancel',onUp); });
 
@@ -907,7 +1041,7 @@ function resize(){
   DPR=Math.min(devicePixelRatio||1,2);
   if(W*H*DPR*DPR>4.2e6) DPR=Math.sqrt(4.2e6/(W*H));
   c2.width=Math.round(W*DPR); c2.height=Math.round(H*DPR);
-  sizeGL(); labDirty=true;
+  sizeGL(); labDirty=true; if(G3) G3.camDirty=true;
 }
 addEventListener('resize',resize);
 
@@ -922,13 +1056,15 @@ function frame(now){
       nextRain=simT+0.35+Math.random()*0.8;
     }
     renderGL();
-  } else if(st.scene!==0){
+  } else if(st.scene===1){
     if(labDirty){ labDirty=false; labReset(); }
+  } else {
+    glassFrame(now);
   }
   requestAnimationFrame(frame);
 }
 
-initGL(); try{ initLab(); }catch(e){ console.error(e); G=null; }
+initGL(); try{ initGlass(); }catch(e){ console.error(e); G3=null; }
 resize();
 setPanel(isSide() && W>=1000);
 setScene(0);
